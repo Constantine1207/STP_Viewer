@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="230 190 880 880">
+  <!-- Side profile: wrist at upper right, four aligned fingers toward lower left. -->
+  <g fill="none" stroke="#233a56" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M967 298 L784 464 Q763 486 739 497 L547 588 Q516 602 493 626 L399 718 Q367 750 343 787 L307 843 Q288 869 274 892 Q264 908 278 914 Q294 922 309 911 L409 817 Q437 790 468 771 L611 706 Q638 692 660 705 Q690 721 687 745 Q685 766 658 790 Q622 822 615 850 Q608 875 623 885 Q639 896 659 875 L694 838 Q714 827 731 801 L818 689 Q842 658 851 618 L862 589 Q866 577 885 562 L1030 474"/>
+    <path d="M511 659 Q477 704 435 738 Q387 778 357 821 L295 912" stroke-width="27"/>
+  </g>
+</svg>

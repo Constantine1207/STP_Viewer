@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/stp/grab">
+        <file alias="open.svg">../images/grab-open.svg</file>
+        <file alias="closed.svg">../images/grab-closed.svg</file>
+    </qresource>
+</RCC>

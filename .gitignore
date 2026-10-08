@@ -1,0 +1,21 @@
+build-*
+*.user
+*.user.*
+custom.pri
+env.pri
+cmake/CustomSteps.cmake
+
+.deps/
+.tools/
+build*/
+dist/
+.DS_Store
+__pycache__/
+
+# Local models, publication staging, and credentials
+STP/
+.env
+.env.*
+*.pem
+*.key
+!build-windows.cmd

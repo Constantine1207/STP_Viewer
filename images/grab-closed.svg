@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="230 190 880 880">
+  <!-- The same wrist and palm; the four aligned fingers curl toward the thumb. -->
+  <g fill="none" stroke="#ffffff" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M967 298 L784 464 Q763 486 739 497 L547 588 Q516 602 493 626 L421 710 Q392 743 392 766 Q393 798 416 832 Q449 882 489 901 Q516 916 535 909 Q555 899 540 876 L511 841 Q500 826 501 807 L503 790 Q508 778 529 766 L603 729 Q626 717 647 727 Q669 735 667 756 Q665 779 641 796 L608 821 Q584 842 577 866 Q566 892 580 903 Q594 914 615 900 L713 835 Q733 824 749 801 L818 689 Q842 658 851 618 L862 589 Q866 577 885 562 L1030 474"/>
+    <path d="M511 669 Q481 707 454 734 Q430 758 430 783 Q430 811 452 848 L489 901" stroke-width="27"/>
+  </g>
+</svg>

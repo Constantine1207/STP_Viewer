@@ -1,0 +1,72 @@
+name: Portable desktop build
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .deps
+            .tools
+          key: native-windows-x64-${{ hashFiles('scripts/dependencies.lock.json', 'scripts/bootstrap*') }}
+      - name: Build, test and package with machine-readable evidence
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -Jobs 4 -SkipGuiTests
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: STPViewer-1.0.0-windows-x64
+          path: |
+            dist/*.exe*
+            dist/*.zip*
+            dist/*-bundle-validation.json
+            dist/windows-build-report.json
+            dist/validation
+          if-no-files-found: error
+
+  macos-arm64:
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .deps
+            .tools
+          key: native-macos-arm64-${{ hashFiles('scripts/dependencies.lock.json', 'scripts/bootstrap*') }}
+      - name: Build pinned dependencies
+        run: bash scripts/bootstrap-macos.sh --jobs 3
+      - name: Configure and build
+        run: |
+          export PATH="$PWD/.tools/venv/bin:$PATH"
+          cmake -C .deps/paths.cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DSTP_BUILD_TESTS=ON
+          cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests --parallel 3
+          ctest --test-dir build --output-on-failure
+      - name: Create portable ZIP
+        run: bash scripts/package-macos.sh build/STPViewer.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STPViewer-1.0.0-macos-arm64
+          path: |
+            dist/*.zip*
+            dist/*-bundle-validation.json
+            dist/validation
+          if-no-files-found: error

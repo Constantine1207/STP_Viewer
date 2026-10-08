@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "upstream": "qt/qttranslations",
+  "tag": "v6.8.3",
+  "commit": "abe01d7de31d311db8bc485d4e7e8d0c30493425",
+  "license_selected": "LGPL-3.0-only",
+  "license_evidence": "UPSTREAM_licenseRule.json: default module/plugin file location rule",
+  "source_modified": false,
+  "compiler": "Qt lrelease 6.8.3",
+  "compile_arguments": [
+    "qtbase_zh_CN.ts",
+    "-qm",
+    "qtbase_zh_CN.qm"
+  ],
+  "generated_translations": 1696,
+  "ignored_untranslated": 90,
+  "files": [
+    {
+      "file": "LICENSE-BSD-3-Clause.txt",
+      "bytes": 1469,
+      "sha256": "9f0490f18656c6f2435bd14f603ef0c96434d1825615363dce43abb42ed1dcce",
+      "upstream_url": "https://github.com/qt/qttranslations/blob/v6.8.3/LICENSES/BSD-3-Clause.txt",
+      "git_blob_sha1": "b91bbd89468099ae5c3028f176783976ca538187"
+    },
+    {
+      "file": "LICENSE-GPL-3.0-only.txt",
+      "bytes": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "upstream_url": "https://github.com/qt/qtbase/blob/v6.8.3/LICENSES/GPL-3.0-only.txt"
+    },
+    {
+      "file": "LICENSE-LGPL-3.0-only.txt",
+      "bytes": 7651,
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "upstream_url": "https://github.com/qt/qtbase/blob/v6.8.3/LICENSES/LGPL-3.0-only.txt"
+    },
+    {
+      "file": "README.md",
+      "bytes": 1896,
+      "sha256": "8421b91dff6b9cdf8b1d852542758d955c22ca45ab5b31080aef9fabb70b5499"
+    },
+    {
+      "file": "UPSTREAM_README.txt",
+      "bytes": 260,
+      "sha256": "88c5f8175c2e137aeb39d5bc3fd28d7290f43c3ce591c4b5ec925675d7070407",
+      "upstream_url": "https://github.com/qt/qttranslations/blob/v6.8.3/translations/README",
+      "git_blob_sha1": "340ef9f85f844f75b8e282b6b62dded2b292cba8"
+    },
+    {
+      "file": "UPSTREAM_licenseRule.json",
+      "bytes": 2017,
+      "sha256": "bd3dd93fa56f54bd5ab78e4209f1dd7d2d27c41d65945db064e6e267b39c009c",
+      "upstream_url": "https://github.com/qt/qttranslations/blob/v6.8.3/licenseRule.json",
+      "git_blob_sha1": "c71054d1bcbb663aaf250911acef8941c255d86d"
+    },
+    {
+      "file": "qtbase_zh_CN.qm",
+      "bytes": 136673,
+      "sha256": "98fd4b97dbec8af5cdd15f85a16c33efc77301b1aeb0469daafc04b9ab2f3570"
+    },
+    {
+      "file": "qtbase_zh_CN.ts",
+      "bytes": 267858,
+      "sha256": "21c2d863020a5fdd86ddf6c30d3875b37795efb7002b47d623e0e4b8dbea3ce8",
+      "upstream_url": "https://github.com/qt/qttranslations/blob/v6.8.3/translations/qtbase_zh_CN.ts",
+      "git_blob_sha1": "8fd8117deb9e365292f3483e9413f8577edbeba9"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "mayo": {
+    "version": "0.10.0",
+    "tag": "v0.10.0",
+    "commit": "f3edd21"
+  },
+  "tools": {
+    "cmake": "3.31.10",
+    "ninja": "1.13.0",
+    "aqtinstall": "3.3.0"
+  },
+  "qt": {
+    "version": "6.8.3",
+    "macos_arch": "clang_64",
+    "windows_arch": "win64_msvc2022_64",
+    "archives": [
+      "qtbase",
+      "qtsvg",
+      "qttools"
+    ],
+    "base": "https://download.qt.io"
+  },
+  "sources": {
+    "freetype": {
+      "version": "2.13.3",
+      "sha256": "bc5c898e4756d373e0d991bab053036c5eb2aa7c0d5c67e8662ddc6da40c4103",
+      "url": "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-13-3",
+      "folder": "freetype-VER-2-13-3"
+    },
+    "occt": {
+      "version": "7.9.3",
+      "sha256": "5ecf094ec6b12d5413dfb851d8c3590c354058aee556e32e408bdfbf8c357d57",
+      "url": "https://codeload.github.com/Open-Cascade-SAS/OCCT/tar.gz/refs/tags/V7_9_3",
+      "folder": "OCCT-7_9_3"
+    },
+    "libxlsxwriter": {
+      "version": "1.2.4",
+      "sha256": "e0db59fc248a5ffa465a05ea83a9d466d4bca0e53ab42771515d4ebb467a41c1",
+      "url": "https://codeload.github.com/jmcnamara/libxlsxwriter/tar.gz/refs/tags/v1.2.4",
+      "folder": "libxlsxwriter-1.2.4"
+    },
+    "zlib": {
+      "version": "1.3.1",
+      "url": "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+      "folder": "zlib-1.3.1",
+      "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+    }
+  }
+}
