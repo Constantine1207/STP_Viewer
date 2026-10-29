@@ -1,6 +1,6 @@
 # 零件位置编辑、STEP 另存与背景颜色
 
-开发基线：`Xiaoyang899/STPViewer` 的 `7e207119f22670d7c5eab35aad4a34c8add00ff7`。验证日期：2026-10-29。
+开发基线：`Xiaoyang899/STPViewer` 的 `7e207119f22670d7c5eab35aad4a34c8add00ff7`。Linux 验证日期：2026-10-29；Windows 云端验证日期：2026-10-30（北京时间）。
 
 ## 在原界面中使用
 
@@ -53,7 +53,7 @@
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1 -Jobs 4
 ```
 
-也可双击根目录 `build-windows.cmd`。脚本准备固定依赖、编译、执行测试并打包。成功后检查 `dist/windows-build-report.json`、`dist/validation/windows/`，再使用 `dist/STPViewer-1.0.0-windows-x64.zip` 或对应单文件 EXE。本次交付的源码包不含这些 Windows 编译产物。
+也可双击根目录 `build-windows.cmd`。脚本准备固定依赖、编译、执行测试并打包。成功后检查 `dist/windows-build-report.json`、`dist/validation/windows/`，再使用 `dist/STPViewer-1.0.0-windows-x64.zip` 或对应单文件 EXE。源码包不含二进制程序；已构建的 Windows 包可从下方 GitHub Actions 运行下载。
 
 已有 `.deps/paths.cmake` 和依赖时，可单独编译并验证新增功能：
 
@@ -77,8 +77,26 @@ Windows 下最后一行使用 `build\stp_editing_integration_tests.exe`。GUI �
 | 新增原生 GUI 集成回归 | 通过：选择、预览、应用、网格重建、多标签背景、文档隔离、关闭取消、菜单保存、重新导入逐实例核对 |
 | 原有 Viewer、Appearance、Layout 图形回归 | 通过 |
 | 原有 Workspace 图形回归 | 未全部通过：1000×700 两个模型截图的前景采样阈值断言失败；基线在同一环境出现相同失败，其他 `passed` 检查通过 |
-| 本分支 Windows / macOS 编译及实机验收 | 尚未执行；不可用上游发行版历史实测代替 |
+| 本分支 Windows x64 云端编译及打包 | 已通过，范围及下载见下节 |
+| 本分支 Windows 实机 / macOS 验收 | 尚未执行；不可用上游发行版历史实测代替 |
 
 STEP 核心测试覆盖：嵌套/重复子装配、多个实例独立编辑、平移与非原点旋转组合、空编辑、源文档不变、名称/零件色/面色/材料/密度、体积/面积/位置、中文路径、取消保持已有文件、禁止覆盖源文件、带固有位置的自由零件。真实样例的 GUI 导出测试还逐个匹配重名实例，防止只按名称核对造成误判。
 
 基线对照使用相同上游提交，仅将已存在的 `m_measurementPanel` 指针声明移出 Windows/macOS 条件分支以允许 Linux 编译；本分支也包含此声明可见性修正。没有为了通过测试修改原有截图断言。软件渲染测试不等于 Windows 实机 GPU、200 MB 大装配或 CATIA 的验收；建议在目标 Windows 主机用实际工程 STEP 完成最后一轮导入、编辑、另存和 CAD 回读。
+
+## Windows 云端构建结果
+
+[成功运行 #2](https://github.com/Constantine1207/STP_Viewer/actions/runs/40949370930) 对应源码提交 `4a867000d99cb54a925238ba712c816e6b900bdc`。环境为 Windows Server 2022 x64、MSVC 14.44、Qt 6.8.3、OCCT 7.9.3、Mesa 26.0.3 软件 OpenGL。首轮失败原因是托管机器的 GDI Generic / OpenGL 1.1，第二轮安装软件驱动后完成全部已启用检查。
+
+| 检查 | 结果 |
+|---|---|
+| 主程序编译与链接、PowerShell 脚本及参数检查 | 通过 |
+| 核心、测量、PMI、任务队列、位置变换、变换面板 | CTest 6/6 通过 |
+| 便携 ZIP 搬移后模型导入、截图、Excel 和 STEP 拆分 | 6 个样例全部通过，清除 Qt/OCCT 开发环境后执行 |
+| 单 EXE 首次解压校验、热缓存启动、缓存损坏恢复 | 通过 |
+| 单 EXE 中文、空格、相对模型路径与 7 项测量记录 | 通过；与上行合计 4/4 项单文件检查 |
+| Windows 完整独立 GUI 交互回归 | 本次使用 `-SkipGuiTests`，未执行；不能据此宣称已通过 |
+
+[下载构建产物](https://github.com/Constantine1207/STP_Viewer/actions/runs/40949370930/artifacts/12931630750)，解压外层文件后运行 `STPViewer-1.0.0-windows-x64-portable.exe`。文件大小 48,389,120 字节；SHA-256 为 `66803c1d7e18995f01c0d0918526eadb158a78ff11223ffba68643d3543ca2f9`。同一产物还包含普通便携 ZIP、校验文件、`windows-build-report.json` 及截图和日志。云端 Mesa 驱动没有添加到交付包。
+
+下一轮实机验收：在目标 Windows 电脑打开工程装配，选择同一零件的一个实例并平移、旋转，另存 `.stp` 后在查看器及目标 CAD 中重新打开，核对各实例位置、零件数量、名称与颜色；再检查撤销/重做和背景颜色重启后的保持。原有 Linux Workspace 两项截图采样断言仍保留为未解决项，后续应依据模型实际投影区域修正截图判据，并同时复测上游基线和本分支，不能简单降低阈值。PMI 重新导出不属于本版本已实现范围。
