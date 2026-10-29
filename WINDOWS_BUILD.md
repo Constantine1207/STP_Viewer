@@ -1,6 +1,6 @@
 # Windows 构建与验证
 
-> 2026-10-29 开发分支说明：移动/旋转、整装 STEP 另存和背景颜色功能已加入源码，Windows 构建入口已增加对应测试，但本分支尚未在 Windows 编译运行。以下历史 Windows 实测属于上游版本，不能作为新增功能的 Windows 验收结果。请在新目录构建本分支，详见 [新增功能及验证说明](doc/placement-editing.md)。
+> 2026-10-30 开发分支说明：移动/旋转、整装 STEP 另存和背景颜色功能已加入源码。首轮 Windows x64 云端构建已完成主程序编译、6/6 核心及面板测试；打包后的图形自检因托管机器默认 OpenGL 1.1 驱动而失败。工作流已增加 Mesa 软件 OpenGL，最终打包状态以对应运行报告为准。以下历史 Windows 实测属于上游版本，不能作为新增功能的 Windows 验收结果。详见 [新增功能及验证说明](doc/placement-editing.md)。
 
 这里是源码构建入口。拿到便携 ZIP 的使用者只需解压并打开 `STPViewer.exe`，无需安装下列开发工具。2026-09-30 已在 16 GB Windows 11 ARM64 虚拟机完成 x64 构建、服务回归 2/2、真实 OpenGL 交互回归及四组便携包搬移自检，另完成三项标准精度性能与导出核对。当前拟发布版本为 1.0 正式版；项目作者已确认 Windows 10 x64 和 Windows 11 x64 中运行实测通过。具体最低版本与独立干净系统范围见验证说明。最新包状态以生成的 JSON、SHA-256 和实际截图/日志为准，详细实测表见 `VALIDATION.md`。
 
@@ -9,6 +9,8 @@
 推送到 `main` 会自动运行 **Portable desktop build** 的 Windows x64 任务；也可在 Actions 页面手动 **Run workflow**。macOS 仅在手动勾选 `build_macos` 时运行。Windows 任务成功后，从运行页面的 **Artifacts → STPViewer-1.0.0-windows-x64** 下载便携 EXE、ZIP、SHA-256 与验证报告。
 
 失败运行可能只有诊断日志，必须以 Windows 任务成功和报告 `status: passed` 为准。云端沿用 `-SkipGuiTests`，仍运行核心测试和打包搬移图形自检；不代表独立交互回归或真实显卡验收已经通过。
+
+Windows 托管机器默认只有 Microsoft GDI Generic / OpenGL 1.1，无法完成 OCCT 图形自检。工作流在临时运行器上安装固定版本 Mesa 26.0.3，使用 `llvmpipe` 软件渲染，并在 JSON 报告中记录测试范围。这一步只配置云端测试机器，Mesa 驱动不添加到交付包；用户电脑仍使用其正常显卡驱动。
 
 ## 在现有电脑或 Windows 虚拟机上构建
 

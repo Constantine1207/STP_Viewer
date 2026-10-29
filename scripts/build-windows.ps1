@@ -36,6 +36,7 @@ try {
     & (Join-Path $PSScriptRoot 'validate-windows-scripts.ps1') -NoNative
     Add-Check 'powershell-script-parser' 'passed' @{ powershell=$PSVersionTable.PSVersion.ToString() }
     $Report.environment = Get-StpMachineEnvironment
+    if ($env:GITHUB_ACTIONS -eq 'true') { $Report.acceptance_limits += 'Hosted-runner graphics tests do not validate physical GPUs or interactive Windows 10/11 desktops.' }
     if ($Report.environment.native_cpu_architecture -eq 'ARM64') { $Report.acceptance_limits += 'This is x64-target validation on Windows ARM64 under emulation, not native x64 hardware validation.' }
     Initialize-StpMsvc
     $Lock = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'dependencies.lock.json') -Raw -Encoding UTF8 | ConvertFrom-Json

@@ -6,11 +6,16 @@ function Get-StpMachineEnvironment {
     $Cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
     $ArchitectureNames = @{ 0='x86'; 5='ARM'; 9='x64'; 12='ARM64' }
     $CpuArchitecture = if ($ArchitectureNames.ContainsKey([int]$Cpu.Architecture)) { $ArchitectureNames[[int]$Cpu.Architecture] } else { [string]$Cpu.Architecture }
+    $GpuTestScope = if ($env:GITHUB_ACTIONS -eq 'true' -and $env:STP_CI_MESA_VERSION) {
+        "GitHub Actions; Mesa $($env:STP_CI_MESA_VERSION) software OpenGL configured; no physical GPU validation"
+    } elseif ($env:GITHUB_ACTIONS -eq 'true') { 'GitHub Actions hosted runner only; no physical GPU validation' }
+    else { 'local interactive session only' }
     return [ordered]@{
         os_name=$System.Caption; os_version=$System.Version; os_build=$System.BuildNumber;
         native_cpu_architecture=$CpuArchitecture; cpu_name=$Cpu.Name; memory_bytes=([int64]$System.TotalVisibleMemorySize * 1024);
         process_architecture=$env:PROCESSOR_ARCHITECTURE; emulation_environment=$env:PROCESSOR_ARCHITEW6432;
-        powershell_version=$PSVersionTable.PSVersion.ToString(); build_target='x64'; gpu_test_scope='local interactive session only'
+        powershell_version=$PSVersionTable.PSVersion.ToString(); build_target='x64'; gpu_test_scope=$GpuTestScope;
+        ci_mesa_version=$env:STP_CI_MESA_VERSION; requested_gallium_driver=$env:GALLIUM_DRIVER
     }
 }
 
