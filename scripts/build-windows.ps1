@@ -15,6 +15,7 @@ $ReportPath = Join-Path $Output 'windows-build-report.json'
 $Report = [ordered]@{
     schema = 1; application = 'STPViewer'; version = '1.0.0'; status = 'running';
     started_utc = [DateTime]::UtcNow.ToString('o'); finished_utc = $null;
+    github_actions = [ordered]@{ repository=$env:GITHUB_REPOSITORY; commit=$env:GITHUB_SHA; run_id=$env:GITHUB_RUN_ID };
     environment = [ordered]@{ os = [Environment]::OSVersion.VersionString; process_architecture = $env:PROCESSOR_ARCHITECTURE; native_architecture = $env:PROCESSOR_ARCHITEW6432; powershell_version = $PSVersionTable.PSVersion.ToString(); build_target = 'x64'; gpu_test_scope = 'local interactive session only' };
     dependencies = $null; checks = @(); package = $null; error = $null;
     acceptance_limits = @('This build is not validation on every supported Windows version.', 'Relocation on the build host is not an independent clean-machine test.', 'A 2000-instance fixture is not a 200 MB engineering-assembly acceptance test.', 'PMI support and split-export limitations remain as recorded in VALIDATION.md.')
