@@ -62,8 +62,8 @@ try {
     $Build = Join-Path $Root 'build-windows'
     Invoke-StpNative $Cmake @('-C', (Join-Path $Root '.deps/paths.cmake'), '-S', $Root, '-B', $Build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DSTP_BUILD_TESTS=ON') (Join-Path $Validation 'configure') | Out-Null
     Add-Check 'configure' 'passed' @{ generator='Ninja'; configuration='Release' }
-    $Targets = @('STPViewer', 'stp_core_tests', 'stp_measurement_tests', 'stp_pmi_tests', 'stp_job_queue_tests')
-    if (-not $SkipGuiTests) { $Targets += @('stp_viewer_tests', 'stp_workspace_tests', 'stp_appearance_tests', 'stp_layout_tests', 'stp_measurement_integration_tests') }
+    $Targets = @('STPViewer', 'stp_core_tests', 'stp_measurement_tests', 'stp_pmi_tests', 'stp_job_queue_tests', 'stp_placement_tests', 'stp_transform_panel_tests')
+    if (-not $SkipGuiTests) { $Targets += @('stp_editing_integration_tests', 'stp_viewer_tests', 'stp_workspace_tests', 'stp_appearance_tests', 'stp_layout_tests', 'stp_measurement_integration_tests') }
     Invoke-StpNative $Cmake (@('--build', $Build, '--target') + $Targets + @('--parallel', [string]$Jobs)) (Join-Path $Validation 'build') -TimeoutSeconds 14400 | Out-Null
     Add-Check 'application-and-regression-build' 'passed' @{ targets=$Targets }
     $Qt = Join-Path $Root ".deps/qt/$($Lock.qt.version)/msvc2022_64"
@@ -74,6 +74,8 @@ try {
     Invoke-StpNative $Ctest @('--test-dir', $Build, '--output-on-failure', '--output-junit', (Join-Path $Validation 'ctest.xml')) (Join-Path $Validation 'ctest') | Out-Null
     Add-Check 'core-and-pmi-ctest' 'passed' @{ junit='validation/windows/ctest.xml'; logs='validation/windows/ctest.*.log' }
     if (-not $SkipGuiTests) {
+        Invoke-StpNative (Join-Path $Build 'stp_editing_integration_tests.exe') @((Join-Path $Root 'samples/colored-assembly.step'), (Join-Path $Validation 'editing')) (Join-Path $Validation 'editing-tests') -TimeoutSeconds 300 | Out-Null
+        Add-Check 'interactive-editing-regression' 'passed' @{ logs='validation/windows/editing-tests.*.log'; evidence='validation/windows/editing' }
         Invoke-StpNative (Join-Path $Build 'stp_viewer_tests.exe') @((Join-Path $Root 'samples/colored-assembly.step')) (Join-Path $Validation 'viewer-tests') -TimeoutSeconds 300 | Out-Null
         Add-Check 'interactive-opengl-regression' 'passed' @{ logs='validation/windows/viewer-tests.*.log' }
         Invoke-StpNative (Join-Path $Build 'stp_measurement_integration_tests.exe') @((Join-Path $Validation 'measurement')) (Join-Path $Validation 'measurement-tests') -TimeoutSeconds 600 | Out-Null

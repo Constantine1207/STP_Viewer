@@ -90,10 +90,12 @@ DocumentWorkspace::DocumentWorkspace(QWidget* parent) : QMainWindow(parent)
     file->addSeparator();
     m_bom=file->addAction(QStringLiteral("导出 Excel BOM"),[this]{if(auto doc=currentDocument())doc->findChild<QAction*>("exportBom")->trigger();});
     m_parts=file->addAction(QStringLiteral("拆分导出 STEP"),[this]{if(auto doc=currentDocument())doc->findChild<QAction*>("exportParts")->trigger();});
+    m_assembly=file->addAction(QStringLiteral("另存 STEP…"),[this]{if(auto doc=currentDocument())doc->findChild<QAction*>("saveAssemblyStep")->trigger();});
+    m_assembly->setObjectName("workspaceSaveAssembly");
     m_bom->setObjectName("workspaceExportBom");m_parts->setObjectName("workspaceExportParts");
     file->addSeparator();auto quit=file->addAction(QStringLiteral("退出"),this,&QWidget::close);quit->setShortcut(QKeySequence::Quit);quit->setMenuRole(QAction::QuitRole);
     m_viewMenu=m_nativeMenu->addMenu(QStringLiteral("视图"));m_helpMenu=m_nativeMenu->addMenu(QStringLiteral("帮助"));
-    for(auto action:{m_open,m_closeCurrent,m_closeAll,m_bom,m_parts,quit}){
+    for(auto action:{m_open,m_closeCurrent,m_closeAll,m_bom,m_parts,m_assembly,quit}){
         action->setParent(this);addAction(action);
     }
     auto corner=new QWidget;auto cornerLayout=new QHBoxLayout(corner);cornerLayout->setContentsMargins(5,2,5,2);
@@ -136,8 +138,9 @@ void DocumentWorkspace::openFiles(const QStringList& paths)
             catch(const std::exception& error){QMessageBox::warning(this,QStringLiteral("窗口创建失败"),QString::fromUtf8(error.what()));continue;}
             m_documents.insert(key,page);m_paths.insert(page,canonical);
             connect(page,&MainWindow::openFilesRequested,this,&DocumentWorkspace::openFiles);
-            connect(page,&MainWindow::stateChanged,this,[this,page]{if(currentDocument()==page)updateActions();});
-            for(auto name:{"exportBom","exportParts"})connect(page->findChild<QAction*>(name),&QAction::changed,this,[this,page]{if(currentDocument()==page)updateActions();});
+            connect(page,&MainWindow::stateChanged,this,[this,page]{if(currentDocument()==page)updateActions();updateLabels();});
+            for(auto name:{"exportBom","exportParts","saveAssemblyStep"})connect(page->findChild<QAction*>(name),&QAction::changed,this,[this,page]{if(currentDocument()==page)updateActions();});
+            connect(page,&MainWindow::closeAfterSaveRequested,this,[this,page]{closeDocument(page);});
             connect(page,&MainWindow::closeReady,this,[this,page]{
                 m_closing.remove(page);page->deleteLater();finishQuit();
             });
@@ -180,6 +183,7 @@ void DocumentWorkspace::updateActions()
     m_closeCurrent->setEnabled(doc&&!m_quitting);m_closeAll->setEnabled(documentCount()>0&&!m_quitting);
     m_bom->setEnabled(doc&&!m_quitting&&doc->findChild<QAction*>("exportBom")->isEnabled());
     m_parts->setEnabled(doc&&!m_quitting&&doc->findChild<QAction*>("exportParts")->isEnabled());
+    m_assembly->setEnabled(doc&&!m_quitting&&doc->findChild<QAction*>("saveAssemblyStep")->isEnabled());
     m_viewMenu->setEnabled(doc&&!m_quitting);m_helpMenu->setEnabled(doc&&!m_quitting);
 }
 
@@ -189,15 +193,17 @@ void DocumentWorkspace::updateLabels()
     for(int index=0;index<m_tabs->count();++index){
         const auto path=m_paths.value(qobject_cast<MainWindow*>(m_tabs->widget(index)));const QFileInfo info(path);
         auto label=info.fileName();if(counts.value(label)>1)label+=QStringLiteral(" — ")+info.absolutePath();
+        if(auto page=qobject_cast<MainWindow*>(m_tabs->widget(index));page&&page->hasPlacementChanges())label+=QStringLiteral(" *");
         m_tabs->setTabText(index,label.replace('&',"&&"));m_tabs->setTabToolTip(index,path);
     }
 }
 
 void DocumentWorkspace::closeCurrent() { closeDocument(currentDocument()); }
-void DocumentWorkspace::closeAll() { while(m_tabs->count())closeDocument(qobject_cast<MainWindow*>(m_tabs->widget(m_tabs->count()-1))); }
+void DocumentWorkspace::closeAll() { while(m_tabs->count()){const int before=m_tabs->count();closeDocument(qobject_cast<MainWindow*>(m_tabs->widget(before-1)));if(m_tabs->count()==before)break;} }
 void DocumentWorkspace::closeDocument(MainWindow* page)
 {
     if(!page)return;const int index=m_tabs->indexOf(page);if(index<0)return;
+    if(!page->confirmPlacementClose())return;
     if(auto current=currentDocument())current->commitManualEditor();
     m_documents.remove(documentKey(m_paths.take(page)));m_closing.insert(page);
     m_tabs->removeTab(index);page->hide();
@@ -220,7 +226,7 @@ void DocumentWorkspace::dropEvent(QDropEvent* event) { openFiles(droppedPaths(ev
 void DocumentWorkspace::closeEvent(QCloseEvent* event)
 {
     if(m_closing.isEmpty()&&documentCount()==0&&m_jobs->idle()){event->accept();return;}
-    m_quitting=true;closeAll();updateActions();statusBar()->showMessage(QStringLiteral("正在安全结束后台任务…"));
+    closeAll();if(documentCount()>0){event->ignore();return;}m_quitting=true;updateActions();statusBar()->showMessage(QStringLiteral("正在安全结束后台任务…"));
     event->ignore();finishQuit();
 }
 void DocumentWorkspace::finishQuit()

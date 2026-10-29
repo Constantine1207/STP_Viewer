@@ -1,4 +1,5 @@
 #include "viewer_widget.h"
+#include <QSettings>
 #include "cad_job_queue.h"
 #include "../app/widget_occ_view.h"
 #include <AIS_Shape.hxx>
@@ -369,6 +370,7 @@ ViewerWidget::ViewerWidget(QWidget* parent) : QWidget(parent)
     m_view->SetBgGradientColors(Quantity_Color(0.91, 0.94, 0.98, Quantity_TOC_sRGB),
                                Quantity_Color(0.98, 0.99, 1.0, Quantity_TOC_sRGB),
                                Aspect_GradientFillMethod_Vertical, false);
+    reloadBackground();
     m_view->SetProj(V3d_XposYnegZpos);
     m_view->Camera()->SetProjectionType(Graphic3d_Camera::Projection_Orthographic);
     m_view->TriedronDisplay(Aspect_TOTP_LEFT_LOWER, Quantity_NOC_GRAY50, 0.09, V3d_ZBUFFER);
@@ -457,6 +459,7 @@ void ViewerWidget::requestSessionClose()
 
 void ViewerWidget::clearDocument()
 {
+    m_placementEdits.clear();
     setMeasurementPicking(false, m_measurementSelection, m_measurementSlot);
     clearMeasurementRecords();
     setGrabMode(false);
@@ -846,9 +849,9 @@ gp_Trsf ViewerWidget::occurrenceDisplayTransform(int index) const
     for (const auto& item : m_items) {
         if (item.occurrence != index) continue;
         gp_Trsf shift; shift.SetTranslation(item.exploded + item.manualOffset);
-        return shift * m_document->occurrences[size_t(index)].worldTransform;
+        return shift * placedWorldTransform(*m_document,m_placementEdits,index);
     }
-    return m_document->occurrences[size_t(index)].worldTransform;
+    return placedWorldTransform(*m_document,m_placementEdits,index);
 }
 
 MeasurementEntity ViewerWidget::measurementPartEntity(int index) const
@@ -1158,7 +1161,38 @@ void ViewerWidget::applyItemTransform(const Item& item)
 {
     gp_Trsf shift;
     shift.SetTranslation(item.exploded + item.manualOffset);
-    m_context->SetLocation(item.object, TopLoc_Location(shift * item.base));
+    m_context->SetLocation(item.object, TopLoc_Location(shift * placementDelta(m_placementEdits,item.occurrence) * item.base));
+}
+
+void ViewerWidget::setPlacementEdits(const PlacementEdits& edits)
+{
+    if(m_sessionClosing)return;
+    if(m_document)validatePlacementEdits(*m_document,edits);
+    finishPartDrag();m_placementEdits=edits;
+    for(const auto& item:m_items)applyItemTransform(item);
+    for(const auto& item:m_pendingItems)applyItemTransform(item);
+    m_context->UpdateSelected(false);updateAnnotations();redraw();
+}
+
+void ViewerWidget::setBackground(const QString& preset,const QColor& custom)
+{
+    if(preset==QStringLiteral("gradient"))
+        m_view->SetBgGradientColors(Quantity_Color(0.91,0.94,0.98,Quantity_TOC_sRGB),
+            Quantity_Color(0.98,0.99,1.,Quantity_TOC_sRGB),Aspect_GradientFillMethod_Vertical,false);
+    else {
+        QColor c=preset==QStringLiteral("white")?QColor("#ffffff"):
+            preset==QStringLiteral("dark")?QColor("#303640"):
+            preset==QStringLiteral("custom")&&custom.isValid()?custom:QColor("#e4e6e9");
+        const Quantity_Color color(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB);
+        m_view->SetBgGradientColors(color,color,Aspect_GradientFillMethod_None,false);
+        m_view->SetBackgroundColor(color);
+    }
+    if(m_surface)redraw();
+}
+void ViewerWidget::reloadBackground()
+{
+    QSettings settings;setBackground(settings.value("view/background","gradient").toString(),
+        settings.value("view/customBackground",QColor("#c6d9eb")).value<QColor>());
 }
 
 void ViewerWidget::resetPartPositions()
@@ -1286,13 +1320,14 @@ void ViewerWidget::setExplosion(int percent, int scope)
 void ViewerWidget::setAnnotationsVisible(bool visible) { m_annotationsVisible=visible; updateAnnotations(); redraw(); }
 void ViewerWidget::updateAnnotations()
 {
-    const bool displaced = m_explosion > 0 || std::any_of(m_items.begin(), m_items.end(),
+    const bool displaced = !m_placementEdits.empty() || m_explosion > 0 || std::any_of(m_items.begin(), m_items.end(),
         [](const Item& item) { return item.manualOffset.SquareMagnitude() > 1.e-16; });
     for (const auto& annotation : m_annotations) {
         bool visible = m_annotationsVisible && !(displaced && annotation.assemblyWide);
         gp_Trsf shift;
         for (const auto& item : m_items) if (item.occurrence==annotation.occurrence) {
-            visible = visible && itemDisplayed(item); shift.SetTranslation(item.exploded + item.manualOffset); break;
+            visible = visible && itemDisplayed(item); shift.SetTranslation(item.exploded + item.manualOffset);
+            shift = shift * placementDelta(m_placementEdits,item.occurrence); break;
         }
         m_context->SetLocation(annotation.object, TopLoc_Location(shift));
         if (visible) { m_context->Display(annotation.object, false); m_context->Deactivate(annotation.object); }
@@ -1439,7 +1474,7 @@ void ViewerWidget::completeMeshWork(int generation, int quality,
                 object = new OccurrencePresentation(occurrence.label, inheritedColors(*m_document, original.occurrence));
                 object->DispatchStyles(false); configureMesh(object, quality);
                 gp_Trsf shift; shift.SetTranslation(original.exploded + original.manualOffset);
-                object->SetLocalTransformation(shift * original.base);
+                object->SetLocalTransformation(shift * placementDelta(m_placementEdits,original.occurrence) * original.base);
                 object->Attributes()->SetFaceBoundaryDraw(m_displayMode == 0);
                 m_context->Display(object, m_displayMode == 2 ? AIS_WireFrame : AIS_Shaded, 0, false);
                 if (original.transparency > 0) m_context->SetTransparency(object, original.transparency / 100.0, false);

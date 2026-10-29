@@ -2,6 +2,8 @@
 
 **面向 Mac 和 Windows 的中文、离线 STEP 工程查看器。**
 
+> 本开发分支新增零件位置编辑、整装 STEP 另存和背景颜色切换。新增功能已在 Linux / Qt 6.8.3 / OCCT 7.9.3 编译并验证；尚未生成或验证本分支的 Windows / macOS 安装包。下文原有平台实测记录属于上游版本。操作方法、验证结果与限制见 [位置编辑说明](doc/placement-editing.md)。
+
 STP Viewer 用于打开 `.stp` / `.step` 文件，查看三维零件与装配、提取工程信息、测量精确几何，并导出 Excel BOM 或拆分零件。文件在本机处理，应用不上传模型、不调用云服务，也不修改源 STEP 文件。
 
 项目基于 [Mayo v0.10.0](https://github.com/fougue/mayo/tree/v0.10.0)，使用 Qt、Open CASCADE Technology 和 libxlsxwriter。当前版本为 **1.0 正式版**，适合工程查看、几何分析与功能验证。
@@ -12,6 +14,8 @@ STP Viewer 用于打开 `.stp` / `.step` 文件，查看三维零件与装配、
 
 - **三维查看**：旋转、平移、缩放、标准视图、透视／正交、装配树、隔离、隐藏、透明、剖切与显示精度切换。
 - **装配探索**：按总装或子装配爆炸；抓手拖动单个零件实例，松开后保留显示位置，支持复位和每文件独立状态。
+- **零件位置编辑**：工具栏“移动 / 旋转”打开右侧“位置编辑”页；支持按 mm 平移、按角度旋转、预览、应用、撤销及重做，再通过“另存 STEP”保存整个装配。
+- **背景颜色**：视图菜单切换浅色渐变、白色、浅灰、深灰或自定义颜色，设置在下次启动时保留。
 - **工程信息**：读取文件中可获得的名称、编号、实例数量、材料和密度，计算包围盒、面积、有效体积及质量；缺失材料与密度可在当前会话补充。
 - **独立测量**：点坐标、长度、半径、直径、面积、体积、质量、质量中心和体积中心。体积中心独立于密度；质量和质量中心要求有效密度。
 - **对象之间测量**：点、边、面、实体、零件及装配汇总的最小距离，提供最近点和 ΔX／ΔY／ΔZ；按切线、法线或特征轴测量 0–90° 小夹角。
@@ -58,7 +62,7 @@ export PATH="$PWD/.tools/venv/bin:$PATH"
 cmake -C .deps/paths.cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DSTP_BUILD_TESTS=ON
-cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests --parallel 6
+cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests stp_placement_tests stp_transform_panel_tests --parallel 6
 ctest --test-dir build --output-on-failure
 bash scripts/package-macos.sh build/STPViewer.app
 ```

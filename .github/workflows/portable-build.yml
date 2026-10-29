@@ -1,6 +1,17 @@
 name: Portable desktop build
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      build_macos:
+        description: Also build the macOS package
+        type: boolean
+        default: false
+
+concurrency:
+  group: portable-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -8,7 +19,7 @@ permissions:
 jobs:
   windows-x64:
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,15 +28,26 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: dependencies
         with:
           path: |
             .deps
             .tools
-          key: native-windows-x64-${{ hashFiles('scripts/dependencies.lock.json', 'scripts/bootstrap*') }}
+          key: native-windows-2022-x64-${{ hashFiles('scripts/dependencies.lock.json', 'scripts/bootstrap*') }}
+      - name: Build pinned dependencies
+        shell: pwsh
+        run: ./scripts/bootstrap-windows.ps1 -Jobs 4
+      - uses: actions/cache/save@v4
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .deps
+            .tools
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
       - name: Build, test and package with machine-readable evidence
         shell: pwsh
-        run: ./scripts/build-windows.ps1 -Jobs 4 -SkipGuiTests
+        run: ./scripts/build-windows.ps1 -Jobs 4 -SkipBootstrap -SkipGuiTests
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -39,6 +61,7 @@ jobs:
           if-no-files-found: error
 
   macos-arm64:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_macos
     runs-on: macos-14
     timeout-minutes: 120
     steps:
@@ -58,7 +81,7 @@ jobs:
         run: |
           export PATH="$PWD/.tools/venv/bin:$PATH"
           cmake -C .deps/paths.cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DSTP_BUILD_TESTS=ON
-          cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests --parallel 3
+          cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests stp_placement_tests stp_transform_panel_tests --parallel 3
           ctest --test-dir build --output-on-failure
       - name: Create portable ZIP
         run: bash scripts/package-macos.sh build/STPViewer.app

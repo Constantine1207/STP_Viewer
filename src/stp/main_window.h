@@ -19,6 +19,7 @@ namespace Stp {
 class ViewerWidget;
 class CadJobQueue;
 class MeasurementPanel;
+class PartTransformPanel;
 class MainWindow final : public QMainWindow {
     Q_OBJECT
 public:
@@ -39,12 +40,15 @@ public:
     QMenu* documentViewMenu() const;
     QMenu* documentHelpMenu() const;
     int appearanceUndoCount() const { return int(m_appearanceHistory.size()); }
+    bool hasPlacementChanges() const;
+    bool confirmPlacementClose();
     void undoAppearance();
     void resetAppearance();
 signals:
     void openFilesRequested(const QStringList& paths);
     void stateChanged();
     void closeReady();
+    void closeAfterSaveRequested();
 protected:
     void dragEnterEvent(QDragEnterEvent*) override;
     void dropEvent(QDropEvent*) override;
@@ -58,6 +62,12 @@ private:
     void chooseFile();
     void saveBom();
     void saveParts();
+    void saveAssembly(bool closeAfter = false);
+    void openPlacementPanel();
+    void updatePlacementActions();
+    PartTransformPanel* m_transformPanel = nullptr;
+    QAction *m_transformAction = nullptr, *m_saveAssemblyAction = nullptr;
+    bool m_placementSceneReady = false;
     void runTask(const QString& title, std::function<void(std::atomic_bool&,const ProgressCallback&)> work,
                  std::function<void(const QString&)> done);
     void setBusy(bool busy, const QString& label = {});
@@ -81,9 +91,9 @@ private:
     void showPartAppearanceMenu(int occurrence, const QPoint& globalPosition);
     void dismissAppearanceMenu();
     void clearAppearanceForNewDocument();
+    MeasurementPanel* m_measurementPanel = nullptr;
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     void updatePartGrabState();
-    MeasurementPanel* m_measurementPanel = nullptr;
     QAction* m_measurementAction = nullptr;
     bool m_measurementSmokeStarted = false;
 #endif

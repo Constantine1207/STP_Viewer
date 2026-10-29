@@ -1,6 +1,8 @@
 #pragma once
 
 #include "cad_document.h"
+#include "part_placement.h"
+#include <QColor>
 #include "pmi.h"
 #include <QWidget>
 #include <AIS_InteractiveContext.hxx>
@@ -58,6 +60,9 @@ public:
     void setGrabMode(bool enabled);
     bool grabMode() const { return m_grabMode; }
     void resetPartPositions();
+    void setPlacementEdits(const PlacementEdits& edits);
+    void setBackground(const QString& preset, const QColor& custom = QColor());
+    void reloadBackground();
     void finishPartDrag();
     void setMeasurementPicking(bool enabled, MeasurementSelection type, int slot = 0);
     bool measurementPicking() const { return m_measurementPicking; }
@@ -147,6 +152,7 @@ private:
     Handle(AIS_InteractiveContext) m_context;
     Handle(Graphic3d_ClipPlane) m_clip;
     std::shared_ptr<CadDocument> m_document;
+    PlacementEdits m_placementEdits;
     std::vector<Item> m_items;
     std::vector<Item> m_pendingItems;
     std::vector<std::pair<TopoDS_Face, Handle(Poly_Triangulation)>> m_meshSnapshot;

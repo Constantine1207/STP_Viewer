@@ -53,7 +53,7 @@ foreach ($Name in @('LICENSE.txt', 'THIRD_PARTY_NOTICES.md', 'STP_README.md', 'V
     Copy-Item $Path $Stage
 }
 New-Item (Join-Path $Stage 'doc') -ItemType Directory -Force | Out-Null
-foreach ($Name in @('stp_mac_measurement.md','stp_mac_part_grab.md','stp_windows_measurement.md')) { Copy-Item (Join-Path $Root "doc/$Name") (Join-Path $Stage 'doc') }
+foreach ($Name in @('stp_mac_measurement.md','stp_mac_part_grab.md','stp_windows_measurement.md','placement-editing.md')) { Copy-Item (Join-Path $Root "doc/$Name") (Join-Path $Stage 'doc') }
 New-Item (Join-Path $Stage 'samples') -ItemType Directory -Force | Out-Null
 Copy-Item (Join-Path $Root 'tests/inputs/cube.step') (Join-Path $Stage 'samples/cube.step')
 if (Test-Path (Join-Path $Root 'samples')) {

@@ -93,7 +93,7 @@ export PATH="$PWD/.tools/venv/bin:$PATH"
 cmake -C .deps/paths.cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DSTP_BUILD_TESTS=ON
-cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests --parallel 6
+cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests stp_placement_tests stp_transform_panel_tests --parallel 6
 ctest --test-dir build --output-on-failure
 bash scripts/package-macos.sh build/STPViewer.app
 ```
