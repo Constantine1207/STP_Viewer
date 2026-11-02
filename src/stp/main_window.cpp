@@ -411,7 +411,14 @@ void MainWindow::buildUi()
     });
 
     auto sectionGroup=new QGroupBox(QStringLiteral("剖切"));auto sectionLayout=new QVBoxLayout(sectionGroup);
-    m_sectionPanel=new SectionPanel(sectionGroup);sectionLayout->addWidget(m_sectionPanel);
+    m_sectionPanel=new SectionPanel(this);m_sectionPanel->setEnabled(false);
+    auto openSection=new QPushButton(QStringLiteral("打开剖切设置…"));openSection->setObjectName("openSectionSettings");
+    sectionLayout->addWidget(openSection);
+    auto sectionHint=new QLabel(QStringLiteral("标准平面 / 拾取零件平面\n旋转、偏移和本色封盖\n仅影响显示，STEP 保留完整几何"));
+    sectionHint->setWordWrap(true);sectionLayout->addWidget(sectionHint);
+    auto closeSection=new QPushButton(QStringLiteral("关闭剖切"));sectionLayout->addWidget(closeSection);sectionLayout->addStretch();
+    m_sectionAction=viewMenu->addAction(QStringLiteral("剖切设置…"),openSection,&QPushButton::click);m_sectionAction->setObjectName("openSectionPanel");m_sectionAction->setEnabled(false);
+    connect(closeSection,&QPushButton::clicked,this,[this]{m_sectionAxis->setCurrentIndex(0);});
     m_sectionAxis=m_sectionPanel->findChild<QComboBox*>("sectionAxis");
     m_sectionPosition=m_sectionPanel->findChild<QSlider*>("sectionSlider");
     m_sectionReverse=m_sectionPanel->findChild<QCheckBox*>("sectionReverse");
@@ -502,6 +509,10 @@ void MainWindow::buildUi()
     m_pmiSummary=new QLabel(QStringLiteral("尚未读取文件")); m_pmiSummary->setWordWrap(true); pmiLayout->addWidget(m_pmiSummary);
     m_pmiTable=table({QStringLiteral("标注"),QStringLiteral("状态"),QStringLiteral("内容 / 原因")}); m_pmiTable->setObjectName("pmiTable"); m_pmiTable->setWordWrap(true); pmiLayout->addWidget(m_pmiTable);
     detailTabs->addTab(pmiPanel,QStringLiteral("PMI 标注"));
+    detailTabs->addTab(m_sectionPanel,QStringLiteral("剖切设置"));
+    connect(openSection,&QPushButton::clicked,this,[this,detailDock,detailTabs]{
+        if(!canChangeAppearance())return;setBomPageVisible(false);detailDock->show();detailTabs->setCurrentWidget(m_sectionPanel);
+    });
     m_transformPanel=new PartTransformPanel(detailTabs);detailTabs->addTab(m_transformPanel,QStringLiteral("位置编辑"));
     m_transformPanel->setSceneEnabled(false);
     connect(m_transformPanel,&PartTransformPanel::placementsChanged,this,[this]{
@@ -509,6 +520,7 @@ void MainWindow::buildUi()
     });
     connect(m_transformPanel,&PartTransformPanel::modifiedChanged,this,[this]{setWindowModified(hasPlacementChanges());emit stateChanged();});
     connect(detailTabs,&QTabWidget::currentChanged,this,[this,detailTabs](int index){
+        if(detailTabs->widget(index)!=m_sectionPanel)m_view->cancelSectionPlanePick();
         if(detailTabs->widget(index)!=m_transformPanel)m_transformPanel->cancelPreview();
         else if(m_transformAction->isEnabled())openPlacementPanel();
     });
@@ -1278,6 +1290,8 @@ void MainWindow::updatePlacementActions()
     const bool ready=m_document&&m_placementSceneReady&&!m_busy&&!m_closePending;
     m_transformAction->setEnabled(ready);m_saveAssemblyAction->setEnabled(ready);
     if(m_transformPanel)m_transformPanel->setSceneEnabled(ready);
+    if(m_sectionPanel)m_sectionPanel->setEnabled(ready);
+    if(m_sectionAction)m_sectionAction->setEnabled(ready);
     updateColorActions();
 }
 

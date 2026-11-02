@@ -85,7 +85,7 @@ private:
     SectionPanel* m_sectionPanel = nullptr;
     ColorEdits m_colors, m_savedColors;
     QUndoStack m_colorHistory;
-    QAction *m_colorAction = nullptr, *m_restoreColorAction = nullptr;
+    QAction *m_colorAction = nullptr, *m_restoreColorAction = nullptr, *m_sectionAction = nullptr;
     QAction *m_undoColorAction = nullptr, *m_redoColorAction = nullptr;
     void filterTree(const QString& text);
     void startSmokeCapture(qint64 loadMs);

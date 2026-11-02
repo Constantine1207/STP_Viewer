@@ -99,7 +99,8 @@ int main(int argc,char** argv){
         const auto body=pixel(QImage(output+"/recolored-body.png"),view,gp_Pnt(10,10,20));
         require(body.red()>body.green()*1.7&&body.blue()>body.green()*1.7,"body pixels did not follow recolor");
         window->setPartColors({red},QColor("#e52b24"));
-        // Exercise actual planar-face picking in the OpenGL viewport.
+        // Exercise the visible settings panel and actual planar-face mouse picking.
+        window->findChild<QAction*>("openSectionPanel")->trigger();require(panel->isVisible(),"section settings are not accessible");
         panel->findChild<QPushButton*>("pickSectionPlane")->click();require(view->sectionPicking(),"pick mode not entered");
         auto viewport=view->findChild<QWidget*>("cadViewport");int px,py;view->view()->Convert(10.,10.,20.,px,py);
         const double ratio=viewport->devicePixelRatioF();QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(px/ratio),qRound(py/ratio)));
