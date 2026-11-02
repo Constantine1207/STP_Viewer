@@ -459,7 +459,12 @@ int main(int argc,char** argv)
     if(measurementLayoutPassed){
         const int oldTab=measurementTabs->currentIndex(),oldOperation=operation->currentIndex();
         const int oldKind=kind->currentData().toInt();
-        measurementLayoutPassed=measurementTabs->count()==4&&measurementTabs->tabText(3)==QStringLiteral("测量记录");
+        const int measurementIndex=measurementTabs->indexOf(measurement);
+        const int recordsIndex=measurementTabs->indexOf(measurement->recordsPage());
+        // Section and placement editing add tabs. Check the actual measurement
+        // pages instead of assuming the old four-tab layout and fixed index.
+        measurementLayoutPassed=measurementIndex>=0&&recordsIndex>=0
+            &&measurementTabs->tabText(recordsIndex)==QStringLiteral("测量记录");
         for(const QSize size : {QSize(900,640),QSize(1000,700),QSize(1440,820)}){
             window.resize(size);measurementTabs->setCurrentWidget(measurement);
             operation->setCurrentIndex(1);kind->setCurrentIndex(kind->findData(int(Stp::MeasurementKind::Angle)));

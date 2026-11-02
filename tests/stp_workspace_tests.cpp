@@ -393,10 +393,14 @@ QJsonObject renderedModel(Stp::MainWindow* page,const QString& path)
     const bool backgroundSaved=view->saveScreenshot(backgroundPath);const QImage background(backgroundPath);
     for(const auto& object:models)view->context()->Display(object,false);
     view->selectOccurrences(selected);viewport->update();QTest::qWait(80);
-    int foreground=0;
+    int foreground=0,projectedPixels=0;
     if(backgroundSaved&&!background.isNull()&&background.size()==image.size()){
-        for(int y=0;y<image.height();y+=2)for(int x=0;x<image.width();x+=2){
+        // Examine every projected pixel: a two-pixel grid aliases tiny parts
+        // after the viewport narrows. Require both real pixel area and coverage
+        // of the expected projection, rather than lowering a sample threshold.
+        for(int y=0;y<image.height();++y)for(int x=0;x<image.width();++x){
             if(!projected.contains(QPoint(x,y)))continue;
+            ++projectedPixels;
             const auto model=image.pixelColor(x,y),blank=background.pixelColor(x,y);
             if(std::max({std::abs(model.red()-blank.red()),std::abs(model.green()-blank.green()),
                          std::abs(model.blue()-blank.blue())})>24)++foreground;
@@ -404,8 +408,11 @@ QJsonObject renderedModel(Stp::MainWindow* page,const QString& path)
     }
     const bool stateRestored=cameraMatches(view->view()->Camera(),camera)&&view->selectedOccurrences()==selected
         &&std::all_of(models.begin(),models.end(),[&](const auto& object){return view->context()->IsDisplayed(object);});
-    return {{"passed",backgroundSaved&&foreground>100&&stateRestored},{"saved",saved},
-        {"width",image.width()},{"height",image.height()},{"foregroundSamples",foreground},
+    const double coverage=projectedPixels?double(foreground)/projectedPixels:0.;
+    return {{"passed",backgroundSaved&&foreground>100&&coverage>=.10&&stateRestored},{"saved",saved},
+        {"width",image.width()},{"height",image.height()},{"foregroundPixels",foreground},
+        {"projectedPixels",projectedPixels},{"projectionCoverage",coverage},
+        {"minimumForegroundPixels",100},{"minimumProjectionCoverage",.10},
         {"legacyCenterForegroundSamples",legacyForeground},{"projectedModelRects",rectangles},
         {"backgroundSaved",backgroundSaved},{"stateRestored",stateRestored},
         {"path",path},{"backgroundPath",backgroundPath}};
@@ -637,9 +644,9 @@ int main(int argc,char** argv)
         for(const auto& object:blankDisplayed)blankView->context()->Display(object,false);
         blankView->selectOccurrences(blankSelection);QTest::qWait(100);
         const bool blankRejected=blankFrame.value("saved").toBool()&&blankFrame.value("backgroundSaved").toBool()
-            &&!blankFrame.value("passed").toBool()&&blankFrame.value("foregroundSamples").toInt()==0;
+            &&!blankFrame.value("passed").toBool()&&blankFrame.value("foregroundPixels").toInt()==0;
         report["axesOnlyViewportRejected"]=QJsonObject{{"passed",blankRejected},
-            {"foregroundSamples",blankFrame.value("foregroundSamples")},{"path",blankFrame.value("path")}};
+            {"foregroundPixels",blankFrame.value("foregroundPixels")},{"path",blankFrame.value("path")}};
         passed=passed&&blankRejected;
         activate(tabs,assemblyPage);auto assemblyView=assemblyPage->findChild<Stp::ViewerWidget*>();
         auto assemblyBom=assemblyPage->findChild<QTableWidget*>("bomTable");
