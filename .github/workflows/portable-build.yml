@@ -1,7 +1,7 @@
 name: Portable desktop build
 on:
   push:
-    branches: [main, feature/section-color-editing]
+    branches: [main, feature/section-color-editing, fix/workspace-regression]
   workflow_dispatch:
     inputs:
       build_macos:
@@ -58,11 +58,11 @@ jobs:
         env:
           GALLIUM_DRIVER: llvmpipe
           STP_CI_MESA_VERSION: '26.0.3'
-        run: ./scripts/build-windows.ps1 -Jobs 4 -SkipBootstrap -SkipGuiTests -RunFeatureGuiTests
+        run: ./scripts/build-windows.ps1 -Jobs 4 -SkipBootstrap -RunFeatureGuiTests
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: STPViewer-section-color-windows-x64
+          name: STPViewer-reviewed-windows-x64
           path: |
             dist/*.exe*
             dist/*.zip*
