@@ -793,7 +793,7 @@ void ViewerWidget::applyItemStyle(Item& item)
         object->ClearCustomAspects();object->SetMaterial(Graphic3d_NOM_PLASTIC);
         const auto& c=color->second;object->SetColor(Quantity_Color(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB));
         item.colorOverridden=true;
-    }else if(item.transparency==0){
+    }else if(item.transparency==0&&object->IsTransparent()){
         // Preserve imported main/face colors and PBR materials, including when
         // restoring alpha after a temporary transparency command.
         object->UnsetTransparency();object->DispatchStyles(false);
@@ -806,9 +806,13 @@ void ViewerWidget::setColorEdits(const ColorEdits& colors)
 {
     if(m_sessionClosing||m_building)return;
     if(m_document)validateColorEdits(*m_document,colors);
-    m_colorEdits=colors;
-    for(auto& item:m_items)applyItemStyle(item);
-    applySection();selectOccurrences(m_selected);redraw();
+    const auto previous=m_colorEdits;m_colorEdits=colors;
+    for(auto& item:m_items){
+        const auto old=previous.find(item.occurrence),now=colors.find(item.occurrence);
+        if((old==previous.end())!=(now==colors.end())
+            ||(old!=previous.end()&&now!=colors.end()&&old->second!=now->second))applyItemStyle(item);
+    }
+    applySection();applyMeasurementSelectionModes();selectOccurrences(m_selected);redraw();
 }
 
 void ViewerWidget::applyTransparency()
