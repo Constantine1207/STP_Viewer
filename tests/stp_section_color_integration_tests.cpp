@@ -96,8 +96,13 @@ int main(int argc,char** argv){
         window->findChild<QAction*>("background_white")->trigger();view->view()->SetProj(V3d_Zpos);view->fitAll();
         window->setPartColors({red},QColor("#8030b0"));view->selectOccurrences({});QTest::qWait(150);
         require(view->saveScreenshot(output+"/recolored-body.png"),"body screenshot");
-        const auto body=pixel(QImage(output+"/recolored-body.png"),view,gp_Pnt(10,10,20));
+        const QImage bodyImage(output+"/recolored-body.png");
+        const auto body=pixel(bodyImage,view,gp_Pnt(10,10,20));
         require(body.red()>body.green()*1.7&&body.blue()>body.green()*1.7,"body pixels did not follow recolor");
+        const auto originalBlue=pixel(bodyImage,view,gp_Pnt(50,10,20));
+        const auto originalGreen=pixel(bodyImage,view,gp_Pnt(82,10,20));
+        require(originalBlue.blue()>originalBlue.red()*1.6,"unedited/restored sibling body color changed");
+        require(originalGreen.green()>originalGreen.red()*1.4,"unedited ring body color changed");
         window->setPartColors({red},QColor("#e52b24"));
         // Exercise the visible settings panel and actual planar-face mouse picking.
         window->findChild<QAction*>("openSectionPanel")->trigger();require(panel->isVisible(),"section settings are not accessible");

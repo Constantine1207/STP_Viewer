@@ -771,13 +771,32 @@ QColor ViewerWidget::occurrenceColor(int index) const
 
 void ViewerWidget::applyItemStyle(Item& item)
 {
-    const auto object=Handle(XCAFPrs_AISObject)::DownCast(item.object);
+    auto object=Handle(XCAFPrs_AISObject)::DownCast(item.object);
     if(object.IsNull())return;
-    object->UnsetTransparency();object->UnsetColor();object->UnsetMaterial();
-    object->ClearCustomAspects();object->DispatchStyles(false);
-    if(const auto color=m_colorEdits.find(item.occurrence);color!=m_colorEdits.end()){
+    const auto color=m_colorEdits.find(item.occurrence);
+    if(color==m_colorEdits.end()&&item.colorOverridden){
+        // UnsetColor/UnsetMaterial would reset imported instance styles to AIS
+        // defaults. Recreate only this presentation from its immutable XDE label.
+        const bool displayed=m_context->IsDisplayed(object);
+        const auto location=object->LocalTransformation();
+        const auto& occurrence=m_document->occurrences[size_t(item.occurrence)];
+        Handle(XCAFPrs_AISObject) restored=new OccurrencePresentation(occurrence.label,inheritedColors(*m_document,item.occurrence));
+        restored->DispatchStyles(false);configureMesh(restored,m_meshQuality);
+        restored->SetLocalTransformation(location);restored->Attributes()->SetFaceBoundaryDraw(m_displayMode==0);
+        m_context->Remove(object,false);item.object=restored;object=restored;
+        m_context->Display(object,m_displayMode==2?AIS_WireFrame:AIS_Shaded,0,false);
+        if(!displayed)m_context->Erase(object,false);
+        item.colorOverridden=false;
+    }
+    if(color!=m_colorEdits.end()){
+        object->UnsetTransparency();
         object->ClearCustomAspects();object->SetMaterial(Graphic3d_NOM_PLASTIC);
         const auto& c=color->second;object->SetColor(Quantity_Color(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB));
+        item.colorOverridden=true;
+    }else if(item.transparency==0){
+        // Preserve imported main/face colors and PBR materials, including when
+        // restoring alpha after a temporary transparency command.
+        object->UnsetTransparency();object->DispatchStyles(false);
     }
     if(item.transparency>0)object->SetTransparency(item.transparency/100.);
     m_context->Redisplay(object,false);

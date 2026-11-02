@@ -125,6 +125,7 @@ private:
         bool visible = true;
         int transparency = 0;
         gp_Vec manualOffset;
+        bool colorOverridden = false;
         Handle(Graphic3d_ClipPlane) clip;
     };
     struct Annotation {
