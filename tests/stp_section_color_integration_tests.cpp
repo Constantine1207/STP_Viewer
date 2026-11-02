@@ -92,8 +92,14 @@ int main(int argc,char** argv){
         window->findChild<QAction*>("redoPartColor")->trigger();require(view->occurrenceColor(blue)==QColor("#8030b0"),"color redo");
         require(window->restorePartColors({blue}),"restore color");require(view->occurrenceColor(blue).blue()>view->occurrenceColor(blue).red()*2,"sibling color restore");
         require(window->setPartColors({red},QColor("#e52b24")),"set red");
+        // Check the actual body pixels as well as the independently styled caps.
+        window->findChild<QAction*>("background_white")->trigger();view->view()->SetProj(V3d_Zpos);view->fitAll();
+        window->setPartColors({red},QColor("#8030b0"));view->selectOccurrences({});QTest::qWait(150);
+        require(view->saveScreenshot(output+"/recolored-body.png"),"body screenshot");
+        const auto body=pixel(QImage(output+"/recolored-body.png"),view,gp_Pnt(10,10,20));
+        require(body.red()>body.green()*1.7&&body.blue()>body.green()*1.7,"body pixels did not follow recolor");
+        window->setPartColors({red},QColor("#e52b24"));
         // Exercise actual planar-face picking in the OpenGL viewport.
-        window->findChild<QAction*>("background_white")->trigger();view->view()->SetProj(V3d_Zpos);view->fitAll();QTest::qWait(150);
         panel->findChild<QPushButton*>("pickSectionPlane")->click();require(view->sectionPicking(),"pick mode not entered");
         auto viewport=view->findChild<QWidget*>("cadViewport");int px,py;view->view()->Convert(10.,10.,20.,px,py);
         const double ratio=viewport->devicePixelRatioF();QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(px/ratio),qRound(py/ratio)));
