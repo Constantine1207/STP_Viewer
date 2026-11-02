@@ -7,6 +7,7 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -69,6 +70,8 @@ QJsonObject control(QWidget* widget)
 }
 void revealControl(Stp::MainWindow& window,QWidget* widget)
 {
+    if(auto section=window.findChild<QWidget*>("sectionPanel");section&&section->isAncestorOf(widget))
+        window.findChild<QAction*>("openSectionPanel")->trigger();
     // Compact desktops put groups in separate pages; inspect each visible page
     // instead of treating deliberately inactive tabs as clipped controls.
     if(auto tabs=window.findChild<QTabWidget*>("viewControlTabs"))
@@ -170,7 +173,12 @@ QJsonObject testPartGrab(Stp::MainWindow& window,const Stp::CadDocument& documen
     auto reset=window.findChild<QPushButton*>("resetPartPositions");auto explosion=window.findChild<QSlider*>("explosionSlider");
     if(!action||!button||!reset||!viewport)return {{"passed",false},{"error","Grab controls missing"}};
     auto transparency=window.findChild<QSlider*>("transparencySlider");auto section=window.findChild<QComboBox*>("sectionAxis");
+    auto offset=window.findChild<QDoubleSpinBox*>("sectionOffset");auto angle=window.findChild<QDoubleSpinBox*>("sectionAngle");
+    auto sectionPosition=window.findChild<QSlider*>("sectionSlider");
+    if(!offset||!angle||!sectionPosition)return {{"passed",false},{"error","Section controls missing"}};
     const int oldTransparency=transparency->value(),oldSection=section->currentIndex();
+    const double oldOffset=offset->value(),oldAngle=angle->value();const int oldPosition=sectionPosition->value();
+    const auto oldEquation=view->view()->ClipPlanes()->First()->GetEquation();
     const auto oldSelection=view->selectedOccurrences();
     const Handle(Graphic3d_Camera) camera=new Graphic3d_Camera(view->view()->Camera());
     transparency->setValue(0);section->setCurrentIndex(0);QTest::qWait(30);
@@ -221,8 +229,14 @@ QJsonObject testPartGrab(Stp::MainWindow& window,const Stp::CadDocument& documen
     for(const auto& state:originals)restored=restored&&sameTransform(state.first->LocalTransformation(),state.second);
     const bool resetScreenshot=view->saveScreenshot(output+"/grab-reset.png");
     QTest::mouseClick(button,Qt::LeftButton);transparency->setValue(oldTransparency);section->setCurrentIndex(oldSection);
+    // Choosing a base plane resets its relative offset/angle by design. Restore
+    // the complete test fixture, not only the combo index, before page checks.
+    offset->setValue(oldOffset);angle->setValue(oldAngle);
+    const bool sectionRestored=section->currentIndex()==oldSection&&sectionPosition->value()==oldPosition
+        &&offset->value()==oldOffset&&angle->value()==oldAngle&&view->view()->ClipPlanes()->First()->GetEquation()==oldEquation;
     view->selectOccurrences(oldSelection);view->selectionChanged(oldSelection);QTest::qWait(30);
-    return {{"passed",defaultOff&&iconStates&&openScreenshot&&closedScreenshot&&enabled&&picked&&grabbed&&closed&&rotationRestored&&regrabbed&&blankDidNotRotate&&restored&&placedScreenshot&&resetScreenshot},
+    return {{"passed",defaultOff&&iconStates&&openScreenshot&&closedScreenshot&&enabled&&picked&&grabbed&&closed&&rotationRestored&&regrabbed&&blankDidNotRotate&&restored&&placedScreenshot&&resetScreenshot&&sectionRestored},
+        {"sectionFixtureRestored",sectionRestored},
         {"iconOnlyAccessibleButton",iconStates},{"openButtonScreenshot",openScreenshot},{"closedButtonScreenshot",closedScreenshot},
         {"defaultOff",defaultOff},{"enabledThroughButton",enabled},{"clickSelectsInstance",picked},{"onlyOneInstanceMovedWithoutRotation",grabbed},
         {"closedRetainsPlacement",closed},{"leftRotationRestored",rotationRestored},{"placedInstanceCanBeGrabbedAgain",regrabbed},
@@ -457,7 +471,12 @@ int main(int argc,char** argv)
     if(measurementLayoutPassed){
         const int oldTab=measurementTabs->currentIndex(),oldOperation=operation->currentIndex();
         const int oldKind=kind->currentData().toInt();
-        measurementLayoutPassed=measurementTabs->count()==4&&measurementTabs->tabText(3)==QStringLiteral("测量记录");
+        const int measurementIndex=measurementTabs->indexOf(measurement);
+        const int recordsIndex=measurementTabs->indexOf(measurement->recordsPage());
+        // Section and placement editing add tabs. Check the actual measurement
+        // pages instead of assuming the old four-tab layout and fixed index.
+        measurementLayoutPassed=measurementIndex>=0&&recordsIndex>=0
+            &&measurementTabs->tabText(recordsIndex)==QStringLiteral("测量记录");
         for(const QSize size : {QSize(900,640),QSize(1000,700),QSize(1440,820)}){
             window.resize(size);measurementTabs->setCurrentWidget(measurement);
             operation->setCurrentIndex(1);kind->setCurrentIndex(kind->findData(int(Stp::MeasurementKind::Angle)));
@@ -536,6 +555,7 @@ int main(int argc,char** argv)
         for(auto button:window.findChildren<QPushButton*>())if(button->text()==QStringLiteral("复位"))QTest::mouseClick(button,Qt::LeftButton);
         const bool reset=explosion->value()==0;
         auto transparency=window.findChild<QSlider*>("transparencySlider");moveSlider(transparency);
+        auto detailsTabs=window.findChild<QTabWidget*>("detailsTabs");const int previousDetails=detailsTabs->currentIndex();
         auto axis=window.findChild<QComboBox*>("sectionAxis");revealControl(window,axis);QTest::mouseClick(axis,Qt::LeftButton);
         QTest::keyClick(axis,Qt::Key_Down);QTest::keyClick(axis,Qt::Key_Return);QTest::qWait(50);
         auto position=window.findChild<QSlider*>("sectionSlider");moveSlider(position);
@@ -545,7 +565,9 @@ int main(int argc,char** argv)
             {"transparencyAfterDrag",transparency->value()},{"sectionAxisAfterKeyboard",axis->currentIndex()},
             {"sectionPositionAfterDrag",position->value()},{"bomBefore",before},{"bomAfter",after}};
         passed=passed&&interacted;view->saveScreenshot(output+"/drag-section-transparent.png");
+        detailsTabs->setCurrentIndex(previousDetails);
         const auto camera=view->view()->Camera();const Handle(Graphic3d_Camera) savedCamera=new Graphic3d_Camera(camera);
+        const int savedTransparency=transparency->value(),savedAxis=axis->currentIndex(),savedPosition=position->value();
         auto viewport=view->findChild<QWidget*>("cadViewport");
         std::atomic_bool cancel(false);auto snapshot=Stp::loadStep(QString::fromLocal8Bit(argv[2]),{},cancel);
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
@@ -553,14 +575,18 @@ int main(int argc,char** argv)
 #endif
         int firstLeaf=-1;for(size_t i=0;i<snapshot->occurrences.size();++i)if(snapshot->occurrences[i].partIndex>=0){firstLeaf=int(i);break;}
         view->selectOccurrences({firstLeaf});view->selectionChanged({firstLeaf});
-        bool scenePreserved=true;
+        bool scenePreserved=true;QJsonArray pageStates;
         for(int cycle=0;cycle<3;++cycle){
-            openPage();scenePreserved=scenePreserved&&view->selectedOccurrences()==std::vector<int>{firstLeaf};
+            openPage();const bool selectionKept=view->selectedOccurrences()==std::vector<int>{firstLeaf};
             QTest::mouseClick(back,Qt::LeftButton);QTest::qWait(100);
-            scenePreserved=scenePreserved&&camera->Center().Distance(savedCamera->Center())<1.e-6
+            const bool cameraKept=camera->Center().Distance(savedCamera->Center())<1.e-6
                 &&camera->Eye().Distance(savedCamera->Eye())<1.e-6&&camera->Direction().IsEqual(savedCamera->Direction(),1.e-6)
-                &&std::abs(camera->Scale()-savedCamera->Scale())<1.e-6&&view->findChild<QWidget*>("cadViewport")==viewport
-                &&transparency->value()>0&&axis->currentIndex()==1&&position->value()!=50;
+                &&std::abs(camera->Scale()-savedCamera->Scale())<1.e-6;
+            const bool viewportKept=view->findChild<QWidget*>("cadViewport")==viewport;
+            const bool controlsKept=transparency->value()==savedTransparency&&axis->currentIndex()==savedAxis&&position->value()==savedPosition;
+            pageStates.append(QJsonObject{{"selectionPreserved",selectionKept},{"cameraPreserved",cameraKept},
+                {"viewportPreserved",viewportKept},{"controlsPreserved",controlsKept},{"sectionPosition",position->value()}});
+            scenePreserved=scenePreserved&&selectionKept&&cameraKept&&viewportKept&&controlsKept;
         }
         openPage();bomTabs->setCurrentIndex(0);QTest::qWait(50);
         bomTable->clearSelection();
@@ -569,7 +595,8 @@ int main(int argc,char** argv)
         const bool bomSelectionLinked=int(view->selectedOccurrences().size())==quantities[0];
         QTest::mouseClick(back,Qt::LeftButton);QTest::qWait(100);
         const bool framebuffer=view->saveScreenshot(output+"/model-after-page-return.png");
-        report["pageState"]=QJsonObject{{"scenePreserved",scenePreserved},{"bomSelectionLinked",bomSelectionLinked},{"framebufferAfterReturn",framebuffer}};
+        report["pageState"]=QJsonObject{{"scenePreserved",scenePreserved},{"cycles",pageStates},
+            {"bomSelectionLinked",bomSelectionLinked},{"framebufferAfterReturn",framebuffer}};
         passed=passed&&scenePreserved&&bomSelectionLinked&&framebuffer;
 
         auto properties=window.findChild<QTableWidget*>("engineeringProperties");
