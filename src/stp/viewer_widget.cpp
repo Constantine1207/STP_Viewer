@@ -3,6 +3,9 @@
 #include "cad_job_queue.h"
 #include "../app/widget_occ_view.h"
 #include <AIS_Shape.hxx>
+#include <Graphic3d_SequenceOfHClipPlane.hxx>
+#include <Graphic3d_MaterialAspect.hxx>
+#include <QKeyEvent>
 #include <AIS_Point.hxx>
 #include <AIS_TextLabel.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -479,6 +482,8 @@ void ViewerWidget::clearDocument()
     m_selectionTransparency = false;
     m_instanceTransparency.clear(); m_temporarilyHidden.clear();
     m_clip->SetOn(false);
+    m_section=SectionState{};m_colorEdits.clear();m_sectionPicking=false;
+    if(!m_sectionGuide.IsNull()){m_context->Remove(m_sectionGuide,false);m_sectionGuide.Nullify();}
     redraw();
 }
 
@@ -596,7 +601,7 @@ void ViewerWidget::startScene(const PmiCatalog& pmi, bool meshesPrepared)
         if (generation != m_sceneGeneration || !m_document) { timer->stop(); timer->deleteLater(); return; }
         if (*pmiCursor < pmi.records.size()) { redraw(); return; }
         timer->stop(); timer->deleteLater();
-        applyTransparency();
+        applyTransparency();applySection();
         for (const auto& item : m_items) applyItemVisibility(item);
         updateAnnotations();
         fitAll();
@@ -758,38 +763,129 @@ void ViewerWidget::setTransparency(int percent, bool selectionOnly)
     applyTransparency(); redraw();
 }
 
-void ViewerWidget::applyTransparency()
+QColor ViewerWidget::occurrenceColor(int index) const
 {
-    for (auto& item : m_items) {
-        const bool selected = std::find(m_selected.begin(), m_selected.end(), item.occurrence) != m_selected.end();
-        int percent = m_selectionTransparency && !selected ? 0 : m_transparency;
-        if (const auto override = m_instanceTransparency.find(item.occurrence);
-            override != m_instanceTransparency.end()) percent = override->second;
-        if (item.transparency == percent) continue;
-        if (percent == 0) {
-            // SetTransparency(0) alone destroys imported per-face alpha. Re-read
-            // the source styles after clearing the temporary global override.
-            item.object->UnsetTransparency();
-            const auto sourceObject = Handle(XCAFPrs_AISObject)::DownCast(item.object);
-            if (!sourceObject.IsNull()) sourceObject->DispatchStyles(false);
-            m_context->Redisplay(item.object, false);
-        } else {
-            m_context->SetTransparency(item.object, percent / 100.0, false);
-        }
-        item.transparency = percent;
-    }
+    const auto it=m_colorEdits.find(index);
+    return it!=m_colorEdits.end()?it->second:m_document?occurrenceBaseColor(*m_document,index):QColor("#cccccc");
 }
 
-void ViewerWidget::setSection(int axis, int position, bool reverse, bool cap)
+void ViewerWidget::applyItemStyle(Item& item)
 {
-    if (axis < 0 || m_bounds.IsVoid()) { m_clip->SetOn(false); redraw(); return; }
-    double x0,y0,z0,x1,y1,z1; m_bounds.Get(x0,y0,z0,x1,y1,z1);
-    const double low[] {x0,y0,z0}, high[] {x1,y1,z1};
-    const double offset = low[axis] + (high[axis]-low[axis]) * position / 100.0;
-    double normal[3] {0,0,0}; normal[axis] = reverse ? -1.0 : 1.0;
-    gp_Pnt point; point.SetCoord(axis+1, offset);
-    m_clip->SetEquation(gp_Pln(point, gp_Dir(normal[0],normal[1],normal[2])));
-    m_clip->SetCapping(cap); m_clip->SetOn(true); redraw();
+    auto object=Handle(XCAFPrs_AISObject)::DownCast(item.object);
+    if(object.IsNull())return;
+    const auto color=m_colorEdits.find(item.occurrence);
+    if(color==m_colorEdits.end()&&item.colorOverridden){
+        // UnsetColor/UnsetMaterial would reset imported instance styles to AIS
+        // defaults. Recreate only this presentation from its immutable XDE label.
+        const bool displayed=m_context->IsDisplayed(object);
+        const auto location=object->LocalTransformation();
+        const auto& occurrence=m_document->occurrences[size_t(item.occurrence)];
+        Handle(XCAFPrs_AISObject) restored=new OccurrencePresentation(occurrence.label,inheritedColors(*m_document,item.occurrence));
+        restored->DispatchStyles(false);configureMesh(restored,m_meshQuality);
+        restored->SetLocalTransformation(location);restored->Attributes()->SetFaceBoundaryDraw(m_displayMode==0);
+        m_context->Remove(object,false);item.object=restored;object=restored;
+        m_context->Display(object,m_displayMode==2?AIS_WireFrame:AIS_Shaded,0,false);
+        if(!displayed)m_context->Erase(object,false);
+        item.colorOverridden=false;
+    }
+    if(color!=m_colorEdits.end()){
+        object->UnsetTransparency();
+        object->ClearCustomAspects();object->SetMaterial(Graphic3d_NOM_PLASTIC);
+        const auto& c=color->second;object->SetColor(Quantity_Color(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB));
+        item.colorOverridden=true;
+    }else if(item.transparency==0&&object->IsTransparent()){
+        // Preserve imported main/face colors and PBR materials, including when
+        // restoring alpha after a temporary transparency command.
+        object->UnsetTransparency();object->DispatchStyles(false);
+    }
+    if(item.transparency>0)object->SetTransparency(item.transparency/100.);
+    m_context->Redisplay(object,false);
+}
+
+void ViewerWidget::setColorEdits(const ColorEdits& colors)
+{
+    if(m_sessionClosing||m_building)return;
+    if(m_document)validateColorEdits(*m_document,colors);
+    const auto previous=m_colorEdits;m_colorEdits=colors;
+    for(auto& item:m_items){
+        const auto old=previous.find(item.occurrence),now=colors.find(item.occurrence);
+        if((old==previous.end())!=(now==colors.end())
+            ||(old!=previous.end()&&now!=colors.end()&&old->second!=now->second))applyItemStyle(item);
+    }
+    applySection();applyMeasurementSelectionModes();selectOccurrences(m_selected);redraw();
+}
+
+void ViewerWidget::applyTransparency()
+{
+    for(auto& item:m_items){
+        const int percent=effectiveOccurrenceTransparency(item.occurrence);
+        if(item.transparency==percent)continue;
+        item.transparency=percent;applyItemStyle(item);
+    }
+    applySection();
+}
+
+void ViewerWidget::setSection(int axis,int position,bool reverse,bool cap)
+{
+    SectionState state;state.enabled=axis>=0&&axis<=2&&!m_bounds.IsVoid();state.reverse=reverse;state.cap=cap;
+    if(state.enabled){
+        double x0,y0,z0,x1,y1,z1;m_bounds.Get(x0,y0,z0,x1,y1,z1);
+        const double low[]{x0,y0,z0},high[]{x1,y1,z1};double n[]{0,0,0};n[axis]=1.;
+        gp_Pnt point;point.SetCoord(axis+1,low[axis]+(high[axis]-low[axis])*position/100.);
+        state.base=gp_Pln(point,gp_Dir(n[0],n[1],n[2]));state.pivot=point;
+    }
+    setSectionState(state);
+}
+
+void ViewerWidget::setSectionState(const SectionState& state)
+{
+    sectionPlane(state); // Validate before replacing the previous display state.
+    m_section=state;applySection();redraw();
+}
+
+void ViewerWidget::applySection()
+{
+    const auto plane=sectionPlane(m_section);const bool enabled=m_section.enabled&&!m_sectionPicking;
+    m_clip->SetEquation(plane);m_clip->SetCapping(m_section.cap);m_clip->SetOn(enabled);
+    for(auto& item:m_items){
+        if(item.clip.IsNull())item.clip=new Graphic3d_ClipPlane;
+        item.clip->SetEquation(plane);item.clip->SetOn(enabled);item.clip->SetCapping(m_section.cap);
+        // One local plane per occurrence gives even a multicolored part a uniform
+        // cap in its main color; suppress the duplicate global plane on this object.
+        auto sequence=new Graphic3d_SequenceOfHClipPlane;sequence->SetOverrideGlobal(true);sequence->Append(item.clip);
+        item.object->SetClipPlanes(sequence);
+        const auto c=m_section.objectColor?occurrenceColor(item.occurrence):QColor("#eb9133");
+        auto material=item.clip->CappingMaterial();
+        material.SetTransparency(item.transparency>0?item.transparency/100.:1.-c.alphaF());
+        item.clip->SetCappingMaterial(material);
+        item.clip->SetCappingColor(Quantity_Color(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB));
+    }
+    if(m_section.showPlane&&enabled){
+        const double size=m_bounds.IsVoid()?10.:std::max(1.,std::sqrt(m_bounds.SquareExtent())*.6);
+        const auto p=plane.Location();const gp_Vec u(plane.Position().XDirection()),v(plane.Position().YDirection());
+        const gp_Pnt points[]{p.Translated((u+v)*size),p.Translated((v-u)*size),p.Translated((-u-v)*size),p.Translated((u-v)*size)};
+        TopoDS_Compound wire;BRep_Builder builder;builder.MakeCompound(wire);
+        for(int i=0;i<4;++i)builder.Add(wire,BRepBuilderAPI_MakeEdge(points[i],points[(i+1)%4]).Shape());
+        builder.Add(wire,BRepBuilderAPI_MakeEdge(p,p.Translated(gp_Vec(plane.Axis().Direction())*size*.3)).Shape());
+        if(m_sectionGuide.IsNull()){
+            m_sectionGuide=new AIS_Shape(wire);m_sectionGuide->SetColor(Quantity_NOC_DARKORANGE);m_sectionGuide->SetWidth(2.);
+            m_sectionGuide->SetInfiniteState(true);auto noClip=new Graphic3d_SequenceOfHClipPlane;noClip->SetOverrideGlobal(true);m_sectionGuide->SetClipPlanes(noClip);
+        }else{m_sectionGuide->SetShape(wire);m_context->Redisplay(m_sectionGuide,false);}
+        m_context->Display(m_sectionGuide,0,-1,false);m_context->Deactivate(m_sectionGuide);
+    }else if(!m_sectionGuide.IsNull())m_context->Erase(m_sectionGuide,false);
+}
+
+void ViewerWidget::beginSectionPlanePick()
+{
+    if(m_building||m_sessionClosing||!m_document)return;
+    setMeasurementPicking(true,MeasurementSelection::Face);
+    m_sectionPicking=true;applySection();emit sectionPickingChanged(true);redraw();
+}
+void ViewerWidget::cancelSectionPlanePick()
+{
+    if(!m_sectionPicking)return;
+    m_sectionPicking=false;setMeasurementPicking(false,MeasurementSelection::Face);
+    applySection();emit sectionPickingChanged(false);redraw();
 }
 
 Bnd_Box ViewerWidget::occurrenceBounds(int index) const
@@ -834,6 +930,7 @@ void ViewerWidget::finishPartDrag()
 void ViewerWidget::setGrabMode(bool enabled)
 {
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    if(enabled)cancelSectionPlanePick();
     if (enabled && m_measurementPicking) setMeasurementPicking(false, m_measurementSelection, m_measurementSlot);
     finishPartDrag();
     m_grabMode = enabled && !m_sessionClosing;
@@ -894,6 +991,7 @@ void ViewerWidget::applyMeasurementSelectionModes()
 
 void ViewerWidget::setMeasurementPicking(bool enabled, MeasurementSelection type, int slot)
 {
+    if(enabled&&m_sectionPicking)cancelSectionPlanePick();
     finishPartDrag();
     if (enabled) setGrabMode(false);
     m_measurementPicking = enabled && !m_sessionClosing && bool(m_document);
@@ -953,6 +1051,14 @@ bool ViewerWidget::pickMeasurementEntity(const QPoint& position)
                 }
             }
             break;
+        }
+        if(m_sectionPicking){
+            try{
+                if(!entity.pickedPoint){emit message(QStringLiteral("请重新拾取平面内部"));return false;}
+                const auto worldPoint=entity.pickedPoint->Transformed(entity.displayTransform);
+                const auto plane=sectionPlaneFromFace(TopoDS::Face(entity.shape),entity.displayTransform,worldPoint);
+                cancelSectionPlanePick();emit sectionPlanePicked(plane,plane.Location(),entity.name);return true;
+            }catch(const std::exception& e){emit message(QString::fromUtf8(e.what()));return false;}
         }
         m_measurementEntities[size_t(m_measurementSlot)] = {entity};
         rebuildMeasurementHighlights();
@@ -1167,6 +1273,7 @@ void ViewerWidget::applyItemTransform(const Item& item)
 void ViewerWidget::setPlacementEdits(const PlacementEdits& edits)
 {
     if(m_sessionClosing)return;
+    cancelSectionPlanePick();
     if(m_document)validatePlacementEdits(*m_document,edits);
     finishPartDrag();m_placementEdits=edits;
     for(const auto& item:m_items)applyItemTransform(item);
@@ -1480,6 +1587,7 @@ void ViewerWidget::completeMeshWork(int generation, int quality,
                 if (original.transparency > 0) m_context->SetTransparency(object, original.transparency / 100.0, false);
                 m_context->Erase(object, false);
                 auto replacement = original; replacement.object = object;
+                applyItemStyle(replacement);
                 m_pendingItems.push_back(std::move(replacement));
             } catch (const Standard_Failure& failure) {
                 if (!object.IsNull()) m_context->Remove(object, false);
@@ -1527,7 +1635,7 @@ void ViewerWidget::finishMeshQuality(bool commit, int quality)
     }
     m_meshSnapshot.clear();
     m_building = false; m_meshChanging = false; m_meshCancel.reset();
-    applyMeasurementSelectionModes(); updateMeasurementPresentations();
+    applySection();applyMeasurementSelectionModes(); updateMeasurementPresentations();
     m_surface->widget()->setUpdatesEnabled(true); redraw();
     if (commit) emit meshQualityFinished(m_meshQuality);
     else emit meshQualityCancelled(m_meshQuality);
@@ -1543,6 +1651,7 @@ bool ViewerWidget::saveScreenshot(const QString& filename)
 bool ViewerWidget::eventFilter(QObject* watched, QEvent* event)
 {
     if (watched!=m_surface->widget()) return QWidget::eventFilter(watched,event);
+    if(event->type()==QEvent::KeyPress&&static_cast<QKeyEvent*>(event)->key()==Qt::Key_Escape&&m_sectionPicking){cancelSectionPlanePick();return true;}
     if (event->type() == QEvent::DevicePixelRatioChange) {
         for (const auto& [id, overlay] : m_measurementOverlays) {
             Q_UNUSED(id);

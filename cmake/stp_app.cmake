@@ -13,7 +13,8 @@ endif()
 
 add_library(stp_core STATIC
     src/stp/cad_document.cpp src/stp/bom_export.cpp src/stp/part_export.cpp src/stp/pmi.cpp
-    src/stp/measurement.cpp src/stp/part_placement.cpp src/stp/assembly_export.cpp)
+    src/stp/measurement.cpp src/stp/part_placement.cpp src/stp/assembly_export.cpp
+    src/stp/color_edits.cpp src/stp/section_state.cpp)
 target_include_directories(stp_core PUBLIC src src/stp "${OpenCASCADE_INCLUDE_DIR}")
 target_link_libraries(stp_core PUBLIC Qt6::Core Qt6::Gui STP::xlsxwriter
     TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKMesh
@@ -26,6 +27,7 @@ endif()
 
 add_library(stp_view STATIC
     src/stp/part_transform_panel.cpp src/stp/part_transform_panel.h
+    src/stp/section_panel.cpp src/stp/section_panel.h
     src/stp/viewer_widget.cpp src/stp/viewer_widget.h
     src/stp/measurement_panel.cpp src/stp/measurement_panel.h
     src/stp/cad_job_queue.cpp src/stp/cad_job_queue.h
@@ -69,6 +71,17 @@ if(WIN32)
 endif()
 if(STP_BUILD_TESTS)
     enable_testing()
+    add_executable(stp_section_color_tests tests/stp_section_color_tests.cpp)
+    target_link_libraries(stp_section_color_tests PRIVATE stp_core)
+    add_test(NAME stp_section_color_tests COMMAND stp_section_color_tests)
+    add_executable(stp_section_color_integration_tests EXCLUDE_FROM_ALL
+        tests/stp_section_color_integration_tests.cpp src/stp/main_window.cpp src/stp/main_window.h
+        src/stp/document_workspace.cpp src/stp/document_workspace.h resources/stp_grab_icons.qrc)
+    target_link_libraries(stp_section_color_integration_tests PRIVATE stp_view Qt6::Test)
+    target_include_directories(stp_section_color_integration_tests PRIVATE src "${CMAKE_BINARY_DIR}")
+    target_compile_definitions(stp_section_color_integration_tests PRIVATE STP_OCCT_RESOURCE_DIR="${STP_DEPS_PREFIX}/share/opencascade/resources")
+    set_target_properties(stp_section_color_integration_tests PROPERTIES AUTOMOC ON AUTORCC ON)
+
     add_executable(stp_placement_tests tests/stp_placement_tests.cpp)
     target_link_libraries(stp_placement_tests PRIVATE stp_core)
     add_test(NAME stp_placement_tests COMMAND stp_placement_tests)

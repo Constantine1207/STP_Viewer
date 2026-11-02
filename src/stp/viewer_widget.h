@@ -2,6 +2,8 @@
 
 #include "cad_document.h"
 #include "part_placement.h"
+#include "section_state.h"
+#include "color_edits.h"
 #include <QColor>
 #include "pmi.h"
 #include <QWidget>
@@ -56,6 +58,14 @@ public:
     bool isOccurrenceDisplayed(int index) const;
     int effectiveOccurrenceTransparency(int index) const;
     void setSection(int axis, int position, bool reverse, bool cap);
+    void setSectionState(const SectionState&);
+    const SectionState& sectionState() const { return m_section; }
+    Bnd_Box modelBounds() const { return m_bounds; }
+    void beginSectionPlanePick();
+    void cancelSectionPlanePick();
+    bool sectionPicking() const { return m_sectionPicking; }
+    void setColorEdits(const ColorEdits&);
+    QColor occurrenceColor(int index) const;
     void setExplosion(int percent, int scope);
     void setGrabMode(bool enabled);
     bool grabMode() const { return m_grabMode; }
@@ -101,6 +111,8 @@ signals:
     void partContextMenuRequested(int occurrence, const QPoint& globalPosition);
     void measurementEntityPicked(const Stp::MeasurementEntity& entity, int slot);
     void measurementPositionsChanged();
+    void sectionPlanePicked(const gp_Pln&, const gp_Pnt&, const QString&);
+    void sectionPickingChanged(bool active);
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void showEvent(QShowEvent* event) override;
@@ -113,6 +125,8 @@ private:
         bool visible = true;
         int transparency = 0;
         gp_Vec manualOffset;
+        bool colorOverridden = false;
+        Handle(Graphic3d_ClipPlane) clip;
     };
     struct Annotation {
         Handle(AIS_InteractiveObject) object;
@@ -134,6 +148,8 @@ private:
     bool partDragPoint(const QPoint& position, gp_Pnt& point) const;
     void updateGrabCursor();
     void applyTransparency();
+    void applyItemStyle(Item&);
+    void applySection();
     bool itemDisplayed(const Item& item) const;
     void applyItemVisibility(const Item& item);
     void finishMeshQuality(bool commit, int quality);
@@ -153,6 +169,10 @@ private:
     Handle(Graphic3d_ClipPlane) m_clip;
     std::shared_ptr<CadDocument> m_document;
     PlacementEdits m_placementEdits;
+    ColorEdits m_colorEdits;
+    SectionState m_section;
+    bool m_sectionPicking = false;
+    Handle(AIS_Shape) m_sectionGuide;
     std::vector<Item> m_items;
     std::vector<Item> m_pendingItems;
     std::vector<std::pair<TopoDS_Face, Handle(Poly_Triangulation)>> m_meshSnapshot;

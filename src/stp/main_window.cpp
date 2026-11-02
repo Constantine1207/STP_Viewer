@@ -1,5 +1,7 @@
 #include "main_window.h"
 #include "part_transform_panel.h"
+#include "section_panel.h"
+#include <QUndoCommand>
 #include "assembly_export.h"
 #include <QColorDialog>
 #include <QSettings>
@@ -77,6 +79,17 @@
 
 namespace Stp {
 namespace {
+class ColorCommand final:public QUndoCommand {
+public:
+    ColorCommand(Stp::ColorEdits before,Stp::ColorEdits after,QString text,
+                 std::function<void(const Stp::ColorEdits&)> apply)
+        :QUndoCommand(text),m_before(std::move(before)),m_after(std::move(after)),m_apply(std::move(apply)){}
+    void undo() override {m_apply(m_before);}
+    void redo() override {m_apply(m_after);}
+private:
+    Stp::ColorEdits m_before,m_after;std::function<void(const Stp::ColorEdits&)> m_apply;
+};
+
 QString number(double value) { return QString::number(value, 'g', 10); }
 QString optionalNumber(const std::optional<double>& value) { return value ? number(*value) : QStringLiteral("未提供/不可计算"); }
 QTableWidget* table(const QStringList& headers)
@@ -252,7 +265,7 @@ void MainWindow::buildUi()
     m_transformAction->setObjectName("editPlacement");m_transformAction->setEnabled(false);
     m_saveAssemblyAction=toolbar->addAction(QStringLiteral("另存 STEP…"),[this]{saveAssembly();});
     m_saveAssemblyAction->setObjectName("saveAssemblyStep");m_saveAssemblyAction->setEnabled(false);
-    m_saveAssemblyAction->setToolTip(QStringLiteral("保存整个装配的已应用位置；不含抓手、爆炸位移及 PMI 标注。"));
+    m_saveAssemblyAction->setToolTip(QStringLiteral("保存完整装配、已应用位置和零件颜色；剖切、封盖、抓手和爆炸仅影响显示。"));
     auto fileMenu=menuBar()->addMenu(QStringLiteral("文件")); fileMenu->addAction(m_openAction); fileMenu->addAction(m_bomAction); fileMenu->addAction(m_partsAction);
     fileMenu->addAction(m_saveAssemblyAction);
     fileMenu->addSeparator(); fileMenu->addAction(QStringLiteral("退出"),this,&QWidget::close);
@@ -397,13 +410,44 @@ void MainWindow::buildUi()
         m_view->setTransparency(m_transparency->value(),selectionOnly);recordAppearanceChange(before);
     });
 
-    auto sectionGroup=new QGroupBox(QStringLiteral("剖切")); auto sectionLayout=new QVBoxLayout(sectionGroup);
-    auto sectionRow=new QHBoxLayout; m_sectionAxis=new QComboBox; m_sectionAxis->addItems({QStringLiteral("关闭"),QStringLiteral("X 平面"),QStringLiteral("Y 平面"),QStringLiteral("Z 平面")});
-    m_sectionAxis->setObjectName("sectionAxis"); m_sectionReverse=new QCheckBox(QStringLiteral("反向")); m_sectionCap=new QCheckBox(QStringLiteral("封盖")); m_sectionCap->setChecked(true);
-    sectionRow->addWidget(m_sectionAxis); sectionRow->addWidget(m_sectionReverse); sectionRow->addWidget(m_sectionCap); sectionLayout->addLayout(sectionRow);
-    m_sectionPosition=slider(50); m_sectionPosition->setObjectName("sectionSlider"); sectionLayout->addWidget(m_sectionPosition);
-    connect(m_sectionAxis,&QComboBox::currentIndexChanged,this,&MainWindow::updateSection); connect(m_sectionPosition,&QSlider::valueChanged,this,&MainWindow::updateSection);
-    connect(m_sectionReverse,&QCheckBox::toggled,this,&MainWindow::updateSection); connect(m_sectionCap,&QCheckBox::toggled,this,&MainWindow::updateSection);
+    auto sectionGroup=new QGroupBox(QStringLiteral("剖切"));auto sectionLayout=new QVBoxLayout(sectionGroup);
+    m_sectionPanel=new SectionPanel(this);m_sectionPanel->setEnabled(false);
+    auto openSection=new QPushButton(QStringLiteral("打开剖切设置…"));openSection->setObjectName("openSectionSettings");
+    sectionLayout->addWidget(openSection);
+    auto sectionHint=new QLabel(QStringLiteral("标准平面 / 拾取零件平面\n旋转、偏移和本色封盖\n仅影响显示，STEP 保留完整几何"));
+    sectionHint->setWordWrap(true);sectionLayout->addWidget(sectionHint);
+    auto closeSection=new QPushButton(QStringLiteral("关闭剖切"));sectionLayout->addWidget(closeSection);sectionLayout->addStretch();
+    m_sectionAction=viewMenu->addAction(QStringLiteral("剖切设置…"),openSection,&QPushButton::click);m_sectionAction->setObjectName("openSectionPanel");m_sectionAction->setEnabled(false);
+    connect(closeSection,&QPushButton::clicked,this,[this]{m_sectionAxis->setCurrentIndex(0);});
+    m_sectionAxis=m_sectionPanel->findChild<QComboBox*>("sectionAxis");
+    m_sectionPosition=m_sectionPanel->findChild<QSlider*>("sectionSlider");
+    m_sectionReverse=m_sectionPanel->findChild<QCheckBox*>("sectionReverse");
+    m_sectionCap=m_sectionPanel->findChild<QCheckBox*>("sectionCap");
+    connect(m_sectionPanel,&SectionPanel::sectionChanged,this,&MainWindow::updateSection);
+    connect(m_sectionPanel,&SectionPanel::cancelPickRequested,m_view,&ViewerWidget::cancelSectionPlanePick);
+    connect(m_view,&ViewerWidget::sectionPickingChanged,m_sectionPanel,&SectionPanel::setPicking);
+    connect(m_view,&ViewerWidget::sectionPlanePicked,m_sectionPanel,&SectionPanel::setPickedPlane);
+    connect(m_view,&ViewerWidget::sceneReady,this,[this]{m_sectionPanel->setBounds(m_view->modelBounds());});
+    connect(m_sectionPanel,&SectionPanel::pickRequested,this,[this]{
+        if(!canChangeAppearance())return;
+        m_transformPanel->cancelPreview();m_view->finishPartDrag();m_view->setGrabMode(false);
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+        if(m_partGrabAction)m_partGrabAction->setChecked(false);
+        if(m_measurementAction)m_measurementAction->setChecked(false);
+        if(m_measurementPanel)m_measurementPanel->cancelForSessionSwitch();
+#endif
+        m_explode->setValue(0);m_view->resetPartPositions();m_view->beginSectionPlanePick();
+    });
+    m_colorAction=toolbar->addAction(QStringLiteral("零件颜色…"),this,&MainWindow::choosePartColor);m_colorAction->setObjectName("setPartColor");
+    m_restoreColorAction=new QAction(QStringLiteral("恢复选中零件原色"),this);m_restoreColorAction->setObjectName("restorePartColor");
+    connect(m_restoreColorAction,&QAction::triggered,this,[this]{restorePartColors(m_view->selectedOccurrences());});
+    m_undoColorAction=new QAction(QStringLiteral("撤销着色"),this);m_undoColorAction->setObjectName("undoPartColor");
+    m_redoColorAction=new QAction(QStringLiteral("重做着色"),this);m_redoColorAction->setObjectName("redoPartColor");
+    connect(m_undoColorAction,&QAction::triggered,this,[this]{if(canChangeAppearance())m_colorHistory.undo();});
+    connect(m_redoColorAction,&QAction::triggered,this,[this]{if(canChangeAppearance())m_colorHistory.redo();});
+    connect(&m_colorHistory,&QUndoStack::indexChanged,this,[this]{updateColorActions();});
+    viewMenu->addSeparator();viewMenu->addAction(m_colorAction);viewMenu->addAction(m_restoreColorAction);
+    viewMenu->addAction(m_undoColorAction);viewMenu->addAction(m_redoColorAction);updateColorActions();
     const auto scrollable=[](QWidget* content){
         auto scroll=new QScrollArea;scroll->setFrameShape(QFrame::NoFrame);scroll->setWidgetResizable(true);
         scroll->setMinimumSize(0,0);
@@ -465,6 +509,10 @@ void MainWindow::buildUi()
     m_pmiSummary=new QLabel(QStringLiteral("尚未读取文件")); m_pmiSummary->setWordWrap(true); pmiLayout->addWidget(m_pmiSummary);
     m_pmiTable=table({QStringLiteral("标注"),QStringLiteral("状态"),QStringLiteral("内容 / 原因")}); m_pmiTable->setObjectName("pmiTable"); m_pmiTable->setWordWrap(true); pmiLayout->addWidget(m_pmiTable);
     detailTabs->addTab(pmiPanel,QStringLiteral("PMI 标注"));
+    detailTabs->addTab(m_sectionPanel,QStringLiteral("剖切设置"));
+    connect(openSection,&QPushButton::clicked,this,[this,detailDock,detailTabs]{
+        if(!canChangeAppearance())return;setBomPageVisible(false);detailDock->show();detailTabs->setCurrentWidget(m_sectionPanel);
+    });
     m_transformPanel=new PartTransformPanel(detailTabs);detailTabs->addTab(m_transformPanel,QStringLiteral("位置编辑"));
     m_transformPanel->setSceneEnabled(false);
     connect(m_transformPanel,&PartTransformPanel::placementsChanged,this,[this]{
@@ -472,6 +520,7 @@ void MainWindow::buildUi()
     });
     connect(m_transformPanel,&PartTransformPanel::modifiedChanged,this,[this]{setWindowModified(hasPlacementChanges());emit stateChanged();});
     connect(detailTabs,&QTabWidget::currentChanged,this,[this,detailTabs](int index){
+        if(detailTabs->widget(index)!=m_sectionPanel)m_view->cancelSectionPlanePick();
         if(detailTabs->widget(index)!=m_transformPanel)m_transformPanel->cancelPreview();
         else if(m_transformAction->isEnabled())openPlacementPanel();
     });
@@ -789,6 +838,11 @@ void MainWindow::showPartAppearanceMenu(int occurrence,const QPoint& globalPosit
             &&self->m_document->occurrences[size_t(occurrence)].partIndex>=0
             &&self->m_view->isOccurrenceDisplayed(occurrence);
     };
+    for(auto source:{m_colorAction,m_restoreColorAction,m_undoColorAction,m_redoColorAction}){
+        auto proxy=menu->addAction(source->text());proxy->setEnabled(source->isEnabled());
+        connect(proxy,&QAction::triggered,this,[validMenu,source]{if(validMenu()&&source->isEnabled())source->trigger();});
+        connect(source,&QAction::changed,proxy,[validMenu,source,proxy]{proxy->setEnabled(validMenu()&&source->isEnabled());});
+    }
     // Popup actions are session-bound proxies. The persistent toolbar/native
     // actions cannot guard against a dismissed menu's delayed activation.
     undo->setEnabled(m_undoAppearanceAction->isEnabled());reset->setEnabled(m_resetAppearanceAction->isEnabled());
@@ -934,7 +988,7 @@ QMenu* MainWindow::documentHelpMenu() const { return menuBar()->findChild<QMenu*
 
 void MainWindow::cancelPendingMeasurementForSessionSwitch()
 {
-    m_transformPanel->cancelPreview();
+    m_transformPanel->cancelPreview();m_view->cancelSectionPlanePick();
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     if(m_measurementPanel)m_measurementPanel->cancelForSessionSwitch();
 #endif
@@ -985,7 +1039,7 @@ void MainWindow::setBusy(bool busy,const QString& label)
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     if(busy)m_view->finishPartDrag();
 #endif
-    if(busy){finishAppearanceDrag();dismissAppearanceMenu();if(m_transformPanel)m_transformPanel->cancelPreview();}
+    if(busy){m_view->cancelSectionPlanePick();finishAppearanceDrag();dismissAppearanceMenu();if(m_transformPanel)m_transformPanel->cancelPreview();}
     m_busy=busy; m_openAction->setEnabled(!busy);m_bomAction->setEnabled(!busy&&bool(m_document));m_partsAction->setEnabled(!busy&&bool(m_document));
     const bool hasIncluded=m_document&&!checkedLeafOccurrences().empty();
     m_bomAction->setEnabled(!busy&&hasIncluded);m_partsAction->setEnabled(!busy&&hasIncluded);
@@ -1088,6 +1142,7 @@ void MainWindow::beginLoadDocument(const QString& path)
             if(m_embedded){m_importError->setText(QStringLiteral("读取未完成：%1").arg(error));m_importFailure->show();emit stateChanged();return;}
             if(!error.contains(QStringLiteral("取消")))QMessageBox::warning(this,QStringLiteral("导入未完成"),error);return;
         }
+        m_colors.clear();m_savedColors.clear();m_colorHistory.clear();
         m_document=*document;m_pmi=*pmi;m_transformPanel->setDocument(m_document);populateDocument();
         setBusy(true,QStringLiteral("建立三维显示…"));m_progress->setValue(98);m_view->setDocument(m_document,m_pmi,true);
     });
@@ -1107,7 +1162,7 @@ void MainWindow::populateDocument()
         if(occurrence.parent>=0&&size_t(occurrence.parent)<m_treeItems.size())m_treeItems[size_t(occurrence.parent)]->addChild(item);else m_tree->addTopLevelItem(item);
         m_treeItems.push_back(item);if(occurrence.partIndex<0)m_scope->addItem(occurrence.path,int(i));
     }
-    m_tree->expandToDepth(1);m_explode->setValue(0);m_transparency->setValue(0);m_sectionAxis->setCurrentIndex(0);
+    m_tree->expandToDepth(1);m_explode->setValue(0);m_transparency->setValue(0);m_sectionPanel->reset();
     const auto quantities=partQuantities(*m_document);m_bom->setRowCount(int(m_document->parts.size()));
     int instanceCount=0;
     for(int quantity:quantities)instanceCount+=quantity;
@@ -1147,7 +1202,7 @@ void MainWindow::selectionChanged(const std::vector<int>& indices,bool updateSce
             const auto index=m_bom->model()->index(row,0);m_bom->selectionModel()->select(index,QItemSelectionModel::Select|QItemSelectionModel::Rows);
         }
     }
-    showProperties(indices);m_transformPanel->setSelection(indices.size()==1?indices.front():-1);m_syncing=false;
+    showProperties(indices);m_transformPanel->setSelection(indices.size()==1?indices.front():-1);m_syncing=false;updateColorActions();
 }
 
 void MainWindow::showProperties(const std::vector<int>& indices)
@@ -1188,19 +1243,62 @@ void MainWindow::saveBom()
         [this,path](const QString& error){if(error.isEmpty())QMessageBox::information(this,QStringLiteral("导出完成"),path);else if(error.contains(QStringLiteral("取消")))m_status->setText(QStringLiteral("已取消 Excel 导出，目标文件未修改。"));else QMessageBox::warning(this,QStringLiteral("导出失败"),error);});
 }
 
-bool MainWindow::hasPlacementChanges() const {return m_transformPanel&&m_transformPanel->isModified();}
+void MainWindow::updateColorActions()
+{
+    if(!m_colorAction)return;
+    const bool ready=canChangeAppearance()&&m_placementSceneReady;
+    const auto selected=m_view->selectedOccurrences();
+    m_colorAction->setEnabled(ready&&!selected.empty());
+    m_restoreColorAction->setEnabled(ready&&std::any_of(selected.begin(),selected.end(),[this](int i){return m_colors.count(i)>0;}));
+    m_undoColorAction->setEnabled(ready&&m_colorHistory.canUndo());m_redoColorAction->setEnabled(ready&&m_colorHistory.canRedo());
+}
+void MainWindow::commitColors(const ColorEdits& next,const QString& text)
+{
+    if(next==m_colors)return;
+    m_transformPanel->cancelPreview();m_view->cancelSectionPlanePick();
+    m_colorHistory.push(new ColorCommand(m_colors,next,text,[this](const ColorEdits& colors){
+        m_colors=colors;m_view->setColorEdits(colors);updateColorActions();
+        setWindowModified(hasPlacementChanges());emit stateChanged();
+    }));
+}
+bool MainWindow::setPartColors(const std::vector<int>& indices,const QColor& color)
+{
+    if(!canChangeAppearance()||!m_placementSceneReady||!color.isValid()||indices.empty())return false;
+    auto next=m_colors;QColor opaque=color.toRgb();opaque.setAlpha(255);
+    for(int i:indices){if(i<0||size_t(i)>=m_document->occurrences.size()||m_document->occurrences[size_t(i)].partIndex<0)return false;next[i]=opaque;}
+    commitColors(next,QStringLiteral("设置零件颜色"));return true;
+}
+bool MainWindow::restorePartColors(const std::vector<int>& indices)
+{
+    if(!canChangeAppearance()||!m_placementSceneReady)return false;
+    auto next=m_colors;for(int i:indices)next.erase(i);commitColors(next,QStringLiteral("恢复零件原色"));return true;
+}
+void MainWindow::choosePartColor()
+{
+    if(!canChangeAppearance())return;
+    const auto indices=m_view->selectedOccurrences();if(indices.empty())return;
+    const auto document=m_document;
+    const auto color=QColorDialog::getColor(m_view->occurrenceColor(indices.front()),this,QStringLiteral("设置选中零件颜色"));
+    if(document!=m_document||!canChangeAppearance()||!color.isValid())return;
+    setPartColors(indices,color);
+}
+
+bool MainWindow::hasPlacementChanges() const {return (m_transformPanel&&m_transformPanel->isModified())||m_colors!=m_savedColors;}
 
 void MainWindow::updatePlacementActions()
 {
     const bool ready=m_document&&m_placementSceneReady&&!m_busy&&!m_closePending;
     m_transformAction->setEnabled(ready);m_saveAssemblyAction->setEnabled(ready);
     if(m_transformPanel)m_transformPanel->setSceneEnabled(ready);
+    if(m_sectionPanel)m_sectionPanel->setEnabled(ready);
+    if(m_sectionAction)m_sectionAction->setEnabled(ready);
+    updateColorActions();
 }
 
 void MainWindow::openPlacementPanel()
 {
     if(!m_transformAction->isEnabled())return;
-    setBomPageVisible(false);m_view->finishPartDrag();m_view->setGrabMode(false);
+    setBomPageVisible(false);m_view->cancelSectionPlanePick();m_view->finishPartDrag();m_view->setGrabMode(false);
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     if(m_partGrabAction)m_partGrabAction->setChecked(false);
     if(m_measurementAction)m_measurementAction->setChecked(false);
@@ -1215,8 +1313,8 @@ void MainWindow::openPlacementPanel()
 bool MainWindow::confirmPlacementClose()
 {
     if(!hasPlacementChanges()){if(m_transformPanel)m_transformPanel->cancelPreview();return true;}
-    if(m_busy){QMessageBox::information(this,QStringLiteral("位置编辑尚未保存"),QStringLiteral("请等待当前任务完成后保存或关闭。"));return false;}
-    const auto answer=QMessageBox::question(this,QStringLiteral("保存位置编辑"),QStringLiteral("当前文件的位置编辑尚未另存为 STEP。是否保存？"),
+    if(m_busy){QMessageBox::information(this,QStringLiteral("模型编辑尚未保存"),QStringLiteral("请等待当前任务完成后保存或关闭。"));return false;}
+    const auto answer=QMessageBox::question(this,QStringLiteral("保存模型编辑"),QStringLiteral("当前文件的位置或颜色编辑尚未另存为 STEP。是否保存？"),
         QMessageBox::Save|QMessageBox::Discard|QMessageBox::Cancel,QMessageBox::Save);
     if(answer==QMessageBox::Discard)return true;
     if(answer==QMessageBox::Save)saveAssembly(true);
@@ -1230,17 +1328,17 @@ void MainWindow::saveAssembly(bool closeAfter)
         QMessageBox::information(this,QStringLiteral("位置预览尚未应用"),QStringLiteral("请先在位置编辑页应用或取消预览，再保存。"));return;
     }
     if(!m_pmi.records.empty()&&QMessageBox::warning(this,QStringLiteral("STEP 标注范围"),
-        QStringLiteral("本版本另存装配保留精确几何和位置，但不导出 PMI 标注。是否继续？"),QMessageBox::Ok|QMessageBox::Cancel,QMessageBox::Cancel)!=QMessageBox::Ok)return;
+        QStringLiteral("本版本另存装配保留完整精确几何、位置和新颜色，但不导出 PMI 标注。是否继续？"),QMessageBox::Ok|QMessageBox::Cancel,QMessageBox::Cancel)!=QMessageBox::Ok)return;
     const QFileInfo source(m_document->sourcePath);
     auto path=QFileDialog::getSaveFileName(this,QStringLiteral("另存调整后的整个装配"),
         source.dir().filePath(source.completeBaseName()+QStringLiteral("_modified.stp")),QStringLiteral("STEP 文件 (*.stp *.step)"));
     if(path.isEmpty())return;if(QFileInfo(path).suffix().isEmpty())path+=".stp";
-    const auto document=m_document;const auto edits=m_transformPanel->committedEdits();
-    runTask(QStringLiteral("保存调整后的装配…"),[document,edits,path](std::atomic_bool& cancel,const ProgressCallback& progress){
-        exportPlacedAssembly(*document,edits,path,progress,cancel);
-    },[this,path,closeAfter](const QString& error){
+    const auto document=m_document;const auto edits=m_transformPanel->committedEdits();const auto colors=m_colors;
+    runTask(QStringLiteral("保存调整后的装配…"),[document,edits,colors,path](std::atomic_bool& cancel,const ProgressCallback& progress){
+        exportPlacedAssembly(*document,edits,path,progress,cancel,colors);
+    },[this,path,closeAfter,colors](const QString& error){
         if(!error.isEmpty()){QMessageBox::warning(this,QStringLiteral("另存未完成"),error);return;}
-        m_transformPanel->markSaved();diagnostic(QStringLiteral("装配已另存：%1。包含已应用的位置编辑；不含 PMI、抓手及爆炸位移。原始 BOM 和拆分导出仍使用导入数据。").arg(path));
+        m_savedColors=colors;m_transformPanel->markSaved();setWindowModified(hasPlacementChanges());emit stateChanged();diagnostic(QStringLiteral("装配已另存：%1。包含完整几何、已应用位置和新颜色；剖切、封盖、抓手、爆炸仅影响显示，不含 PMI。原始 BOM 和拆分导出仍使用导入数据。").arg(path));
         m_status->setText(QStringLiteral("已保存：%1").arg(path));
         if(closeAfter){if(m_embedded)emit closeAfterSaveRequested();else close();}
     });
@@ -1280,7 +1378,7 @@ void MainWindow::diagnostic(const QString& text)
     if(m_closePending)return;
     m_diagnostics->append(QStringLiteral("[%1] %2").arg(QDateTime::currentDateTime().toString("HH:mm:ss"),text.toHtmlEscaped()));
 }
-void MainWindow::updateSection(){m_view->setSection(m_sectionAxis->currentIndex()-1,m_sectionPosition->value(),m_sectionReverse->isChecked(),m_sectionCap->isChecked());}
+void MainWindow::updateSection(){if(m_view&&m_sectionPanel)m_view->setSectionState(m_sectionPanel->state());}
 void MainWindow::filterTree(const QString& text)
 {
     for(auto item:m_treeItems)item->setHidden(!text.isEmpty());

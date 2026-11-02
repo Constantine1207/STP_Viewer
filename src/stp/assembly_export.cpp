@@ -1,6 +1,9 @@
 #include "assembly_export.h"
 #include "part_export.h"
 #include <BRep_Builder.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <XCAFDoc_ColorTool.hxx>
+#include <XCAFDoc_VisMaterialTool.hxx>
 #include <DESTEP_Parameters.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <STEPCAFControl_Writer.hxx>
@@ -45,19 +48,23 @@ private: QSaveFile& file;std::atomic_bool& cancel;
 };
 }
 Handle(TDocStd_Document) buildPlacedAssembly(const CadDocument& doc,const PlacementEdits& edits,
-                                            std::atomic_bool& cancel) {
-    validatePlacementEdits(doc,edits);check(cancel);
+                                            std::atomic_bool& cancel,const ColorEdits& colors) {
+    validatePlacementEdits(doc,edits);validateColorEdits(doc,colors);check(cancel);
     if(doc.xde.IsNull()||doc.occurrences.empty())throw std::runtime_error("没有可导出的装配");
     Handle(TDocStd_Document) target=new TDocStd_Document("BinXCAF");
     XCAFDoc_DocumentTool::Set(target->Main());XCAFDoc_DocumentTool::SetLengthUnit(target,0.001);
     const auto src=XCAFDoc_DocumentTool::ShapeTool(doc.xde->Main());
     const auto dst=XCAFDoc_DocumentTool::ShapeTool(target->Main());
     TDF_LabelDataMap labels;
-    std::vector<TDF_Label> parts;
-    for(const auto& part:doc.parts) {
+    std::vector<TDF_Label> parts(doc.parts.size());
+    std::vector<bool> needsOriginal(doc.parts.size(),false);
+    for(size_t i=0;i<doc.occurrences.size();++i){const auto& o=doc.occurrences[i];
+        if(o.partIndex>=0&&!colors.count(int(i)))needsOriginal.at(o.partIndex)=true;}
+    for(size_t i=0;i<doc.parts.size();++i) {
+        const auto& part=doc.parts[i];
         check(cancel);
         if(part.shape.IsNull())throw std::runtime_error("零件缺少精确几何，无法完整导出");
-        parts.push_back(XCAFDoc_Editor::CloneShapeLabel(part.label,src,dst,labels));
+        if(needsOriginal[i])parts[i]=XCAFDoc_Editor::CloneShapeLabel(part.label,src,dst,labels);
     }
     NCollection_DataMap<Handle(XCAFDoc_VisMaterial),Handle(XCAFDoc_VisMaterial)> materials;
     // Includes per-face styles and original part properties, never session supplements.
@@ -65,37 +72,71 @@ Handle(TDocStd_Document) buildPlacedAssembly(const CadDocument& doc,const Placem
         XCAFDoc_Editor::CloneMetaData(it.Key(),it.Value(),&materials);
     for(size_t i=0;i<parts.size();++i) {
         const auto& p=doc.parts[i];
+        if(parts[i].IsNull())continue;
         if(!p.material.isEmpty()||p.densityKgM3)
             XCAFDoc_DocumentTool::MaterialTool(target->Main())->SetMaterial(parts[i],
                 new TCollection_HAsciiString(p.material.toUtf8().constData()),new TCollection_HAsciiString(""),
                 p.densityKgM3?*p.densityKgM3/1000.:0.,new TCollection_HAsciiString("density"),
                 new TCollection_HAsciiString("NUMERIC_MEASURE"));
     }
+    const auto colorTool=XCAFDoc_DocumentTool::ColorTool(target->Main());
+    const auto visTool=XCAFDoc_DocumentTool::VisMaterialTool(target->Main());
+    const auto applyColor=[&](const TDF_Label& label,const QColor& c){
+        visTool->UnSetShapeMaterial(label);
+        const Quantity_Color rgb(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB);
+        for(auto type:{XCAFDoc_ColorGen,XCAFDoc_ColorSurf,XCAFDoc_ColorCurv}) colorTool->SetColor(label,rgb,type);
+    };
+    const auto coloredPart=[&](int index,const QColor& color){
+        const auto& part=doc.parts.at(index);
+        // New topology prevents ShapeTool deduplication and color leakage to siblings.
+        // Underlying exact surfaces/curves are shared; no tessellation or Boolean cut.
+        BRepBuilderAPI_Copy copy(part.shape,false,false);
+        const auto label=dst->NewShape();dst->SetShape(label,copy.Shape());
+        XCAFDoc_Editor::CloneMetaData(part.label,label,&materials,false,true,true,false);
+        TDF_LabelSequence subs;src->GetSubShapes(part.label,subs);
+        for(int i=1;i<=subs.Length();++i){
+            const auto shape=copy.ModifiedShape(src->GetShape(subs(i)));
+            if(shape.IsNull())continue;
+            const auto sub=dst->AddSubShape(label,shape);
+            if(sub.IsNull())continue;
+            XCAFDoc_Editor::CloneMetaData(subs(i),sub,&materials,false,true,true,false);
+            applyColor(sub,color);
+        }
+        if(!part.material.isEmpty()||part.densityKgM3)
+            XCAFDoc_DocumentTool::MaterialTool(target->Main())->SetMaterial(label,
+                new TCollection_HAsciiString(part.material.toUtf8().constData()),new TCollection_HAsciiString(""),
+                part.densityKgM3?*part.densityKgM3/1000.:0.,new TCollection_HAsciiString("density"),
+                new TCollection_HAsciiString("NUMERIC_MEASURE"));
+        applyColor(label,color);return label;
+    };
     auto newAssembly=[&](){TopoDS_Compound shape;BRep_Builder().MakeCompound(shape);return dst->AddShape(shape,false);};
     const auto root=newAssembly();nameLabel(root,QFileInfo(doc.sourcePath).completeBaseName()+QStringLiteral("_edited"));
     std::function<void(int,const TDF_Label&)> append=[&](int index,const TDF_Label& parent){
         check(cancel);const auto& o=doc.occurrences.at(index);
         // Every assembly occurrence gets its own definition. Shared leaf definitions remain shared.
         // This prevents changing a nested part in one repeated subassembly from moving its siblings.
-        const auto definition=o.partIndex>=0?parts.at(o.partIndex):newAssembly();
+        const auto color=colors.find(index);
+        const auto definition=o.partIndex>=0
+            ?(color!=colors.end()?coloredPart(o.partIndex,color->second):parts.at(o.partIndex)):newAssembly();
         if(o.partIndex<0)XCAFDoc_Editor::CloneMetaData(o.definitionLabel,definition,&materials);
         const gp_Trsf parentWorld=o.parent<0?gp_Trsf():doc.occurrences.at(o.parent).worldTransform;
         const gp_Trsf local=parentWorld.Inverted()*placedWorldTransform(doc,edits,index);
         const auto component=dst->AddComponent(parent,definition,TopLoc_Location(local));
         XCAFDoc_Editor::CloneMetaData(o.label,component,&materials);nameLabel(component,o.name);
+        if(color!=colors.end())applyColor(component,color->second);
         for(int child:o.children)append(child,definition);
     };
     for(size_t i=0;i<doc.occurrences.size();++i)if(doc.occurrences[i].parent<0)append(int(i),root);
     dst->UpdateAssemblies();check(cancel);return target;
 }
 void exportPlacedAssembly(const CadDocument& doc,const PlacementEdits& edits,const QString& path,
-                          const ProgressCallback& progress,std::atomic_bool& cancel) {
+                          const ProgressCallback& progress,std::atomic_bool& cancel,const ColorEdits& colors) {
     const QFileInfo outputInfo(path),sourceInfo(doc.sourcePath);
     if(!doc.sourcePath.isEmpty()&&(outputInfo.absoluteFilePath()==sourceInfo.absoluteFilePath()
        ||(outputInfo.exists()&&outputInfo.canonicalFilePath()==sourceInfo.canonicalFilePath())))
         throw std::runtime_error("请另存为新文件，不能覆盖当前导入的 STEP");
     if(progress)progress(10,QStringLiteral("建立调整后的装配…"));
-    const auto target=buildPlacedAssembly(doc,edits,cancel);
+    const auto target=buildPlacedAssembly(doc,edits,cancel,colors);
     STEPCAFControl_Writer writer;writer.SetColorMode(true);writer.SetNameMode(true);
     writer.SetLayerMode(true);writer.SetPropsMode(true);writer.SetMaterialMode(true);
     // Assembly/PMI associations need a separate remapping implementation. Never claim full PMI fidelity.

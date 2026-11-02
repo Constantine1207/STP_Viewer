@@ -2,6 +2,7 @@ param(
     [ValidateRange(1,64)][int]$Jobs = 4,
     [switch]$SkipBootstrap,
     [switch]$SkipGuiTests,
+    [switch]$RunFeatureGuiTests,
     [string]$Output = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -64,8 +65,9 @@ try {
     $Build = Join-Path $Root 'build-windows'
     Invoke-StpNative $Cmake @('-C', (Join-Path $Root '.deps/paths.cmake'), '-S', $Root, '-B', $Build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DSTP_BUILD_TESTS=ON') (Join-Path $Validation 'configure') | Out-Null
     Add-Check 'configure' 'passed' @{ generator='Ninja'; configuration='Release' }
-    $Targets = @('STPViewer', 'stp_core_tests', 'stp_measurement_tests', 'stp_pmi_tests', 'stp_job_queue_tests', 'stp_placement_tests', 'stp_transform_panel_tests')
+    $Targets = @('STPViewer', 'stp_core_tests', 'stp_measurement_tests', 'stp_pmi_tests', 'stp_job_queue_tests', 'stp_placement_tests', 'stp_transform_panel_tests', 'stp_section_color_tests')
     if (-not $SkipGuiTests) { $Targets += @('stp_editing_integration_tests', 'stp_viewer_tests', 'stp_workspace_tests', 'stp_appearance_tests', 'stp_layout_tests', 'stp_measurement_integration_tests') }
+    if ($RunFeatureGuiTests) { $Targets += @('stp_section_color_integration_tests'); if ($SkipGuiTests) { $Targets += @('stp_editing_integration_tests') } }
     Invoke-StpNative $Cmake (@('--build', $Build, '--target') + $Targets + @('--parallel', [string]$Jobs)) (Join-Path $Validation 'build') -TimeoutSeconds 14400 | Out-Null
     Add-Check 'application-and-regression-build' 'passed' @{ targets=$Targets }
     $Qt = Join-Path $Root ".deps/qt/$($Lock.qt.version)/msvc2022_64"
@@ -90,6 +92,14 @@ try {
             Add-Check ("interactive-{0}-regression" -f $Test) 'passed' @{ evidence=("validation/windows/{0}" -f $Test) }
         }
     } else { Add-Check 'interactive-opengl-regression' 'skipped' 'Explicit -SkipGuiTests. Packaged smoke tests still run; physical desktop interaction remains unverified.' }
+    if ($RunFeatureGuiTests) {
+        Invoke-StpNative (Join-Path $Build 'stp_section_color_integration_tests.exe') @((Join-Path $Validation 'section-color')) (Join-Path $Validation 'section-color-tests') -TimeoutSeconds 300 | Out-Null
+        Add-Check 'section-color-gui-and-step-roundtrip' 'passed' @{ report='validation/windows/section-color/section-color-report.json'; evidence='validation/windows/section-color' }
+        if ($SkipGuiTests) {
+            Invoke-StpNative (Join-Path $Build 'stp_editing_integration_tests.exe') @((Join-Path $Root 'samples/colored-assembly.step'), (Join-Path $Validation 'editing')) (Join-Path $Validation 'editing-tests') -TimeoutSeconds 300 | Out-Null
+            Add-Check 'interactive-editing-regression' 'passed' @{ evidence='validation/windows/editing' }
+        }
+    }
     & (Join-Path $PSScriptRoot 'package-windows.ps1') -Executable (Join-Path $Build 'STPViewer.exe') -Output $Output -DependencyPrefix $Prefix
     & (Join-Path $PSScriptRoot 'package-windows-single.ps1') -Directory (Join-Path $Output 'STPViewer-1.0.0-windows-x64') -Archive (Join-Path $Output 'STPViewer-1.0.0-windows-x64.zip') -Output (Join-Path $Output 'STPViewer-1.0.0-windows-x64-portable.exe')
     Add-Check 'single-exe-extraction-and-measurement' 'passed' @{ report='validation/windows/single-exe/single-exe-report.json' }
