@@ -69,6 +69,8 @@ QJsonObject control(QWidget* widget)
 }
 void revealControl(Stp::MainWindow& window,QWidget* widget)
 {
+    if(auto section=window.findChild<QWidget*>("sectionPanel");section&&section->isAncestorOf(widget))
+        window.findChild<QAction*>("openSectionPanel")->trigger();
     // Compact desktops put groups in separate pages; inspect each visible page
     // instead of treating deliberately inactive tabs as clipped controls.
     if(auto tabs=window.findChild<QTabWidget*>("viewControlTabs"))
@@ -536,6 +538,7 @@ int main(int argc,char** argv)
         for(auto button:window.findChildren<QPushButton*>())if(button->text()==QStringLiteral("复位"))QTest::mouseClick(button,Qt::LeftButton);
         const bool reset=explosion->value()==0;
         auto transparency=window.findChild<QSlider*>("transparencySlider");moveSlider(transparency);
+        auto detailsTabs=window.findChild<QTabWidget*>("detailsTabs");const int previousDetails=detailsTabs->currentIndex();
         auto axis=window.findChild<QComboBox*>("sectionAxis");revealControl(window,axis);QTest::mouseClick(axis,Qt::LeftButton);
         QTest::keyClick(axis,Qt::Key_Down);QTest::keyClick(axis,Qt::Key_Return);QTest::qWait(50);
         auto position=window.findChild<QSlider*>("sectionSlider");moveSlider(position);
@@ -545,6 +548,7 @@ int main(int argc,char** argv)
             {"transparencyAfterDrag",transparency->value()},{"sectionAxisAfterKeyboard",axis->currentIndex()},
             {"sectionPositionAfterDrag",position->value()},{"bomBefore",before},{"bomAfter",after}};
         passed=passed&&interacted;view->saveScreenshot(output+"/drag-section-transparent.png");
+        detailsTabs->setCurrentIndex(previousDetails);
         const auto camera=view->view()->Camera();const Handle(Graphic3d_Camera) savedCamera=new Graphic3d_Camera(camera);
         auto viewport=view->findChild<QWidget*>("cadViewport");
         std::atomic_bool cancel(false);auto snapshot=Stp::loadStep(QString::fromLocal8Bit(argv[2]),{},cancel);

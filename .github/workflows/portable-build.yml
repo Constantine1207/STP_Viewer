@@ -28,6 +28,15 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+      - name: Set a full-size desktop for native GUI regression
+        shell: pwsh
+        run: |
+          $helper = Join-Path $env:RUNNER_TEMP 'stp-ci-display.exe'
+          $object = Join-Path $env:RUNNER_TEMP 'stp-ci-display.obj'
+          cl /nologo /W4 /EHsc scripts/configure-ci-display.cpp "/Fo$object" "/Fe$helper" /link user32.lib
+          if ($LASTEXITCODE -ne 0) { throw 'CI display helper compilation failed.' }
+          & $helper
+          if ($LASTEXITCODE -ne 0) { throw 'CI display configuration failed.' }
       - uses: actions/cache/restore@v4
         id: dependencies
         with:
@@ -92,7 +101,7 @@ jobs:
         run: |
           export PATH="$PWD/.tools/venv/bin:$PATH"
           cmake -C .deps/paths.cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DSTP_BUILD_TESTS=ON
-          cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests stp_placement_tests stp_transform_panel_tests --parallel 3
+          cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests stp_placement_tests stp_transform_panel_tests stp_section_color_tests --parallel 3
           ctest --test-dir build --output-on-failure
       - name: Create portable ZIP
         run: bash scripts/package-macos.sh build/STPViewer.app

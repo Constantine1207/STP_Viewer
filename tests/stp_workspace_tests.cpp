@@ -26,6 +26,7 @@
 #include <QMap>
 #include <QPointer>
 #include <QPushButton>
+#include <QRegion>
 #include <QSaveFile>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -295,6 +296,20 @@ QJsonObject reachableControls(Stp::MainWindow* page)
 {
     QJsonArray controls;bool reachable=true;int count=0;
     auto tabs=page->findChild<QTabWidget*>("viewControlTabs");const int originalTab=tabs?tabs->currentIndex():0;
+    const auto inspect=[&](QWidget* widget,const QString& group){
+        if(!widget){reachable=false;return;}
+        const bool initiallyVisible=widget->isVisible()&&visibleRect(widget)==widget->rect();
+        QScrollArea* scroll=nullptr;
+        for(auto parent=widget->parentWidget();parent;parent=parent->parentWidget())
+            if((scroll=qobject_cast<QScrollArea*>(parent)))break;
+        if(scroll){scroll->ensureWidgetVisible(widget,0,0);QTest::qWait(20);}
+        const bool fullyReachable=widget->isVisible()&&visibleRect(widget)==widget->rect();
+        const auto rect=visibleRect(widget);
+        controls.append(QJsonObject{{"name",widget->objectName()},{"class",QString::fromLatin1(widget->metaObject()->className())},
+            {"group",group},{"initiallyFullyVisible",initiallyVisible},{"scrollAvailable",bool(scroll)},
+            {"fullyReachable",fullyReachable},{"visibleRect",QJsonArray{rect.x(),rect.y(),rect.width(),rect.height()}}});
+        reachable=reachable&&fullyReachable;++count;
+    };
     for(auto group:page->findChildren<QGroupBox*>())for(auto widget:group->findChildren<QWidget*>()){
         if(!qobject_cast<QComboBox*>(widget)&&!qobject_cast<QSlider*>(widget)
             &&!qobject_cast<QCheckBox*>(widget)&&!qobject_cast<QPushButton*>(widget)&&!qobject_cast<QToolButton*>(widget))continue;
@@ -304,42 +319,96 @@ QJsonObject reachableControls(Stp::MainWindow* page)
         // controls on inactive detail tabs are absent from the visible layout.
         // Measurement has its own explicit reachability coverage.
         if(!widget->isVisible())continue;
-        const bool initiallyVisible=widget->isVisible()&&visibleRect(widget)==widget->rect();
-        QScrollArea* scroll=nullptr;
-        for(auto parent=widget->parentWidget();parent;parent=parent->parentWidget())
-            if((scroll=qobject_cast<QScrollArea*>(parent)))break;
-        if(scroll){scroll->ensureWidgetVisible(widget,0,0);QTest::qWait(20);}
-        const bool fullyReachable=widget->isVisible()&&visibleRect(widget)==widget->rect();
-        const auto rect=visibleRect(widget);
-        controls.append(QJsonObject{{"name",widget->objectName()},{"class",QString::fromLatin1(widget->metaObject()->className())},
-            {"group",group->title()},{"initiallyFullyVisible",initiallyVisible},{"scrollAvailable",bool(scroll)},
-            {"fullyReachable",fullyReachable},{"visibleRect",QJsonArray{rect.x(),rect.y(),rect.width(),rect.height()}}});
-        reachable=reachable&&fullyReachable;++count;
+        inspect(widget,group->title());
     }
+    // Verify controls by identity, including the section controls now reached
+    // through the right details tab. A reduced bottom-row count is not a loss
+    // of functionality, and a numeric minimum cannot prove completeness.
+    bool requiredPresent=true;
+    for(const char* name:{"explosionScope","explosionSlider","resetPartPositions","meshQuality",
+                         "transparencySlider","selectedTransparency","openSectionSettings"})
+        requiredPresent=page->findChild<QWidget*>(name)&&requiredPresent;
+    auto details=page->findChild<QTabWidget*>("detailsTabs");const int originalDetails=details?details->currentIndex():0;
+    auto sectionAction=page->findChild<QAction*>("openSectionPanel");
+    if(sectionAction&&sectionAction->isEnabled())sectionAction->trigger();else requiredPresent=false;
+    auto section=page->findChild<QWidget*>("sectionPanel");
+    for(const char* name:{"sectionAxis","sectionOffset","sectionSlider","sectionRotationAxis","sectionAngle",
+                         "sectionCenterMode","sectionCenter0","sectionCenter1","sectionCenter2","pickSectionPlane",
+                         "sectionReverse","sectionCap","sectionObjectColor","sectionShowPlane","resetSection"}){
+        auto widget=section?section->findChild<QWidget*>(name):nullptr;
+        requiredPresent=widget&&requiredPresent;inspect(widget,QStringLiteral("剖切设置"));
+    }
+    if(details)details->setCurrentIndex(originalDetails);
     if(tabs)tabs->setCurrentIndex(originalTab);
     for(auto scroll:page->findChildren<QScrollArea*>()){
         scroll->horizontalScrollBar()->setValue(0);scroll->verticalScrollBar()->setValue(0);
     }
     auto hint=page->findChild<QLabel*>("interactionHint");
     const bool hintVisible=hint&&hint->isVisible()&&visibleRect(hint)==hint->rect();
-    return {{"passed",reachable&&count>=11&&hintVisible},{"controlCount",count},
+    return {{"passed",reachable&&requiredPresent&&hintVisible},{"controlCount",count},{"requiredControlsPresent",requiredPresent},
         {"rightSidebarHintFullyVisible",hintVisible},{"controls",controls}};
 }
 QJsonObject renderedModel(Stp::MainWindow* page,const QString& path)
 {
     auto view=page->findChild<Stp::ViewerWidget*>();QTest::qWait(120);
     const bool saved=view&&view->saveScreenshot(path);const QImage image(path);
-    int foreground=0;
-    // The crop excludes the corner trihedron: a blank CAD viewport with only
-    // axes must not pass. The shaded model and its edges differ from the pale
-    // background by substantially more than one antialiasing level.
+    int legacyForeground=0;
+    // Keep the old metric as diagnostic evidence, not the acceptance rule: a
+    // preserved camera can put the model outside this crop after resizing.
     for(int y=image.height()/5;y<image.height()*4/5;y+=2)
         for(int x=image.width()/5;x<image.width()*4/5;x+=2){
             const auto color=image.pixelColor(x,y);
-            if(std::min({color.red(),color.green(),color.blue()})<205)++foreground;
+            if(std::min({color.red(),color.green(),color.blue()})<205)++legacyForeground;
         }
-    return {{"passed",saved&&!image.isNull()&&foreground>100},{"saved",saved},
-        {"width",image.width()},{"height",image.height()},{"foregroundSamples",foreground},{"path",path}};
+    if(!saved||image.isNull()||!page->document())return {{"passed",false},{"saved",saved},{"path",path}};
+
+    // Project the currently placed/exploded instances, in framebuffer pixels.
+    // Test the whole visible projection instead of a fixed center rectangle.
+    QRegion projected;QJsonArray rectangles;
+    for(size_t i=0;i<page->document()->occurrences.size();++i){
+        if(!view->isOccurrenceDisplayed(int(i)))continue;
+        const auto entity=view->measurementPartEntity(int(i));if(entity.shape.IsNull())continue;
+        Bnd_Box box;BRepBndLib::Add(entity.shape,box);if(box.IsVoid()||box.IsOpen())continue;
+        double a,b,c,d,e,f;box.Get(a,b,c,d,e,f);QRect bounds;bool first=true;
+        for(double x:{a,d})for(double y:{b,e})for(double z:{c,f}){
+            const auto point=gp_Pnt(x,y,z).Transformed(entity.displayTransform);int px,py;
+            view->view()->Convert(point.X(),point.Y(),point.Z(),px,py);
+            const QRect pixel(px,py,1,1);bounds=first?pixel:bounds.united(pixel);first=false;
+        }
+        bounds=bounds.adjusted(-2,-2,2,2).intersected(image.rect());
+        if(!bounds.isEmpty()){projected+=bounds;rectangles.append(QJsonArray{bounds.x(),bounds.y(),bounds.width(),bounds.height()});}
+    }
+
+    // Capture the same camera/background/axes with only the CAD bodies erased.
+    // Their difference rejects an axes-only viewport, even on a dark background.
+    // Restore presentations and logical selection before checking session state.
+    AIS_ListOfInteractive displayed;view->context()->DisplayedObjects(displayed);
+    std::vector<Handle(AIS_InteractiveObject)> models;
+    for(const auto& object:displayed)if(!Handle(XCAFPrs_AISObject)::DownCast(object).IsNull())models.push_back(object);
+    const auto selected=view->selectedOccurrences();
+    const Handle(Graphic3d_Camera) camera=new Graphic3d_Camera(view->view()->Camera());
+    for(const auto& object:models)view->context()->Erase(object,false);
+    auto viewport=view->findChild<QWidget*>("cadViewport");viewport->update();QTest::qWait(80);
+    const QString backgroundPath=path+".background.png";
+    const bool backgroundSaved=view->saveScreenshot(backgroundPath);const QImage background(backgroundPath);
+    for(const auto& object:models)view->context()->Display(object,false);
+    view->selectOccurrences(selected);viewport->update();QTest::qWait(80);
+    int foreground=0;
+    if(backgroundSaved&&!background.isNull()&&background.size()==image.size()){
+        for(int y=0;y<image.height();y+=2)for(int x=0;x<image.width();x+=2){
+            if(!projected.contains(QPoint(x,y)))continue;
+            const auto model=image.pixelColor(x,y),blank=background.pixelColor(x,y);
+            if(std::max({std::abs(model.red()-blank.red()),std::abs(model.green()-blank.green()),
+                         std::abs(model.blue()-blank.blue())})>24)++foreground;
+        }
+    }
+    const bool stateRestored=cameraMatches(view->view()->Camera(),camera)&&view->selectedOccurrences()==selected
+        &&std::all_of(models.begin(),models.end(),[&](const auto& object){return view->context()->IsDisplayed(object);});
+    return {{"passed",backgroundSaved&&foreground>100&&stateRestored},{"saved",saved},
+        {"width",image.width()},{"height",image.height()},{"foregroundSamples",foreground},
+        {"legacyCenterForegroundSamples",legacyForeground},{"projectedModelRects",rectangles},
+        {"backgroundSaved",backgroundSaved},{"stateRestored",stateRestored},
+        {"path",path},{"backgroundPath",backgroundPath}};
 }
 void require(bool condition,const char* message) { if(!condition)throw std::runtime_error(message); }
 QJsonObject exportThroughUi(QAction* action,const QString& target,const QString& successTitle,QWidget* toolbarButton=nullptr,bool waitCompletion=true)
@@ -556,6 +625,22 @@ int main(int argc,char** argv)
     report["windowsCaseInsensitivePathAlias"]=caseAlias;passed=passed&&caseAlias;
 #endif
     if(loaded){
+        // A real axes-only framebuffer must fail the model-presence check.
+        // Keep the document and camera intact so the projected bounds alone
+        // cannot make an empty rendering pass.
+        activate(tabs,cubePage);auto blankView=cubePage->findChild<Stp::ViewerWidget*>();
+        AIS_ListOfInteractive blankDisplayed;blankView->context()->DisplayedObjects(blankDisplayed);
+        const auto blankSelection=blankView->selectedOccurrences();
+        for(const auto& object:blankDisplayed)blankView->context()->Erase(object,false);
+        blankView->findChild<QWidget*>("cadViewport")->update();QTest::qWait(100);
+        const auto blankFrame=renderedModel(cubePage,output+"/negative-axes-only.png");
+        for(const auto& object:blankDisplayed)blankView->context()->Display(object,false);
+        blankView->selectOccurrences(blankSelection);QTest::qWait(100);
+        const bool blankRejected=blankFrame.value("saved").toBool()&&blankFrame.value("backgroundSaved").toBool()
+            &&!blankFrame.value("passed").toBool()&&blankFrame.value("foregroundSamples").toInt()==0;
+        report["axesOnlyViewportRejected"]=QJsonObject{{"passed",blankRejected},
+            {"foregroundSamples",blankFrame.value("foregroundSamples")},{"path",blankFrame.value("path")}};
+        passed=passed&&blankRejected;
         activate(tabs,assemblyPage);auto assemblyView=assemblyPage->findChild<Stp::ViewerWidget*>();
         auto assemblyBom=assemblyPage->findChild<QTableWidget*>("bomTable");
         auto assemblyProperties=assemblyPage->findChild<QTableWidget*>("engineeringProperties");
