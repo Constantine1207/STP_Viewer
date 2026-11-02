@@ -10,6 +10,7 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XCAFDoc_ColorTool.hxx>
+#include <Quantity_Color.hxx>
 #include <XCAFDoc_MaterialTool.hxx>
 #include <TCollection_HAsciiString.hxx>
 #include <TDataStd_Name.hxx>

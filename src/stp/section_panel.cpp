@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSlider>
+#include <QScrollArea>
 #include <QVBoxLayout>
 #include <algorithm>
 #include <cmath>
@@ -14,7 +15,11 @@
 namespace Stp {
 SectionPanel::SectionPanel(QWidget* parent):QWidget(parent) {
     setObjectName("sectionPanel");
-    auto layout=new QVBoxLayout(this); auto form=new QFormLayout;
+    auto outer=new QVBoxLayout(this);outer->setContentsMargins(0,0,0,0);
+    auto scroll=new QScrollArea;scroll->setWidgetResizable(true);scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setMinimumSize(0,0);scroll->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
+    auto content=new QWidget;scroll->setWidget(content);outer->addWidget(scroll);
+    auto layout=new QVBoxLayout(content); auto form=new QFormLayout;
     m_base=new QComboBox; m_base->setObjectName("sectionAxis");
     m_base->addItems({QStringLiteral("关闭"),QStringLiteral("YZ 平面（法向 X）"),
         QStringLiteral("ZX 平面（法向 Y）"),QStringLiteral("XY 平面（法向 Z）"),QStringLiteral("拾取的零件平面")});

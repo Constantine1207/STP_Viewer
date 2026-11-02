@@ -803,8 +803,6 @@ void MainWindow::showPartAppearanceMenu(int occurrence,const QPoint& globalPosit
     auto placement=menu->addAction(QStringLiteral("移动 / 旋转…"));placement->setObjectName("partEditPlacement");
     placement->setEnabled(!m_busy&&m_placementSceneReady);
     connect(placement,&QAction::triggered,this,[this,occurrence]{selectionChanged({occurrence},true);openPlacementPanel();});
-    menu->addAction(m_colorAction);menu->addAction(m_restoreColorAction);
-    menu->addAction(m_undoColorAction);menu->addAction(m_redoColorAction);
     menu->addSeparator();
     auto transparent=menu->addAction(QStringLiteral("透明显示（70%）"));transparent->setObjectName(QStringLiteral("makePartTransparent70"));
     auto hide=menu->addAction(QStringLiteral("隐藏零件"));hide->setObjectName(QStringLiteral("hidePart"));
@@ -828,6 +826,11 @@ void MainWindow::showPartAppearanceMenu(int occurrence,const QPoint& globalPosit
             &&self->m_document->occurrences[size_t(occurrence)].partIndex>=0
             &&self->m_view->isOccurrenceDisplayed(occurrence);
     };
+    for(auto source:{m_colorAction,m_restoreColorAction,m_undoColorAction,m_redoColorAction}){
+        auto proxy=menu->addAction(source->text());proxy->setEnabled(source->isEnabled());
+        connect(proxy,&QAction::triggered,this,[validMenu,source]{if(validMenu()&&source->isEnabled())source->trigger();});
+        connect(source,&QAction::changed,proxy,[validMenu,source,proxy]{proxy->setEnabled(validMenu()&&source->isEnabled());});
+    }
     // Popup actions are session-bound proxies. The persistent toolbar/native
     // actions cannot guard against a dismissed menu's delayed activation.
     undo->setEnabled(m_undoAppearanceAction->isEnabled());reset->setEnabled(m_resetAppearanceAction->isEnabled());
