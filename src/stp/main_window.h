@@ -7,6 +7,8 @@
 #include "appearance_state.h"
 #include <QPointer>
 #include <optional>
+#include "color_edits.h"
+#include <QUndoStack>
 
 class QAction; class QCheckBox; class QComboBox; class QLabel; class QLineEdit;
 class QProgressBar; class QPushButton; class QSlider; class QTableWidget; class QTableWidgetItem;
@@ -20,6 +22,7 @@ class ViewerWidget;
 class CadJobQueue;
 class MeasurementPanel;
 class PartTransformPanel;
+class SectionPanel;
 class MainWindow final : public QMainWindow {
     Q_OBJECT
 public:
@@ -44,6 +47,9 @@ public:
     bool confirmPlacementClose();
     void undoAppearance();
     void resetAppearance();
+    bool setPartColors(const std::vector<int>& occurrences, const QColor& color);
+    bool restorePartColors(const std::vector<int>& occurrences);
+    const ColorEdits& colorEdits() const { return m_colors; }
 signals:
     void openFilesRequested(const QStringList& paths);
     void stateChanged();
@@ -73,6 +79,14 @@ private:
     void setBusy(bool busy, const QString& label = {});
     void diagnostic(const QString& text);
     void updateSection();
+    void choosePartColor();
+    void commitColors(const ColorEdits&, const QString&);
+    void updateColorActions();
+    SectionPanel* m_sectionPanel = nullptr;
+    ColorEdits m_colors, m_savedColors;
+    QUndoStack m_colorHistory;
+    QAction *m_colorAction = nullptr, *m_restoreColorAction = nullptr;
+    QAction *m_undoColorAction = nullptr, *m_redoColorAction = nullptr;
     void filterTree(const QString& text);
     void startSmokeCapture(qint64 loadMs);
     void setBomPageVisible(bool visible);
