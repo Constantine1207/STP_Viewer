@@ -1,7 +1,7 @@
 name: Portable desktop build
 on:
   push:
-    branches: [main, feature/section-color-editing, fix/workspace-regression]
+    branches: [main, feature/section-color-editing, fix/workspace-regression, feature/details-two-rows]
   workflow_dispatch:
     inputs:
       build_macos:

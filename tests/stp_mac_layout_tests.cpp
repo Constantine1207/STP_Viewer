@@ -478,6 +478,31 @@ int main(int argc,char** argv)
         measurementLayoutPassed=measurementIndex>=0&&recordsIndex>=0
             &&measurementTabs->tabText(recordsIndex)==QStringLiteral("测量记录");
         for(const QSize size : {QSize(900,640),QSize(1000,700),QSize(1440,820)}){
+            window.resize(size);QTest::qWait(100);
+            const QStringList expectedPages={QStringLiteral("工程信息"),QStringLiteral("PMI 标注"),
+                QStringLiteral("剖切设置"),QStringLiteral("位置编辑"),QStringLiteral("测量"),QStringLiteral("测量记录")};
+            bool navigationPassed=measurementTabs->count()==6&&!measurementTabs->tabBar()->isVisible();
+            QRect buttonRects[6];
+            for(int index=0;index<6;++index){
+                auto button=window.findChild<QPushButton*>(QStringLiteral("detailsPageButton%1").arg(index));
+                const bool reachable=button&&button->isVisible()&&visibleRect(button)==button->rect();
+                navigationPassed=navigationPassed&&reachable&&button->text()==expectedPages[index];
+                if(!reachable)continue;
+                buttonRects[index]=button->geometry();
+                QTest::mouseClick(button,Qt::LeftButton);QTest::qWait(30);
+                navigationPassed=navigationPassed&&measurementTabs->currentIndex()==index&&button->isChecked();
+                measurementTabs->setCurrentIndex((index+1)%6);
+                auto next=window.findChild<QPushButton*>(QStringLiteral("detailsPageButton%1").arg((index+1)%6));
+                navigationPassed=navigationPassed&&!button->isChecked()&&next&&next->isChecked();
+            }
+            for(int column=0;column<3;++column){
+                navigationPassed=navigationPassed&&buttonRects[column].top()==buttonRects[0].top()
+                    &&buttonRects[column+3].top()==buttonRects[3].top()
+                    &&buttonRects[column].left()==buttonRects[column+3].left()
+                    &&buttonRects[column].bottom()<buttonRects[column+3].top();
+            }
+            report[QStringLiteral("twoRowNavigation%1x%2").arg(size.width()).arg(size.height())]=navigationPassed;
+            measurementLayoutPassed=measurementLayoutPassed&&navigationPassed;
             window.resize(size);measurementTabs->setCurrentWidget(measurement);
             operation->setCurrentIndex(1);kind->setCurrentIndex(kind->findData(int(Stp::MeasurementKind::Angle)));
             for (const auto* name : {"measurementSelectionA","measurementSelectionB"}) {

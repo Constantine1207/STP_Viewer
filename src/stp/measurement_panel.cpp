@@ -89,8 +89,9 @@ MeasurementPanel::MeasurementPanel(ViewerWidget* viewer, CadJobQueue* jobs, quin
     setAccessibleName(QStringLiteral("工程测量"));
     if (!m_jobs) m_jobs = new CadJobQueue(this);
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(6, 6, 6, 6);
-    layout->setSpacing(6);
+    // Leave room for the two-row detail navigation on compact windows.
+    layout->setContentsMargins(4, 4, 4, 4);
+    layout->setSpacing(3);
     auto* instructions = new QLabel(QStringLiteral("单击拾取 · 拖动旋转 · 自动保留"), this);
     layout->addWidget(instructions);
     auto* typeRow = new QHBoxLayout;
@@ -123,7 +124,7 @@ MeasurementPanel::MeasurementPanel(ViewerWidget* viewer, CadJobQueue* jobs, quin
         m_slotGroup[slot] = new QGroupBox(this);
         m_slotGroup[slot]->setObjectName(measurementControlName("measurementSlotGroup", slot));
         auto* slotLayout = new QVBoxLayout(m_slotGroup[slot]);
-        slotLayout->setContentsMargins(6, 6, 6, 6);
+        slotLayout->setContentsMargins(4, 4, 4, 4);
         slotLayout->setSpacing(4);
         auto* row = new QHBoxLayout;
         row->setSpacing(4);
@@ -182,7 +183,7 @@ MeasurementPanel::MeasurementPanel(ViewerWidget* viewer, CadJobQueue* jobs, quin
     m_status = new QLabel(this);
     m_status->setObjectName(QStringLiteral("measurementStatus"));
     m_status->setWordWrap(true);
-    m_status->setFixedHeight(fontMetrics().lineSpacing() * 3 + 4);
+    m_status->setFixedHeight(fontMetrics().lineSpacing() * 2 + 4);
     m_status->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     m_status->setTextInteractionFlags(Qt::TextSelectableByMouse);
     statusRow->addWidget(m_status, 1);

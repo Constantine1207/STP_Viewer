@@ -16,6 +16,8 @@
 #include <QApplication>
 #include <QAction>
 #include <QCheckBox>
+#include <QButtonGroup>
+#include <QGridLayout>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
@@ -557,7 +559,30 @@ void MainWindow::buildUi()
     });
 #endif
     auto detailPanel=new QWidget;auto detailLayout=new QVBoxLayout(detailPanel);
-    detailLayout->setContentsMargins(6,6,6,6);detailLayout->addWidget(detailTabs,1);
+    detailLayout->setContentsMargins(6,6,6,6);
+    // Keep one page stack and its existing signals, with three entries per row.
+    // Both rows stay visible when the dock is narrow; selection never moves rows.
+    detailTabs->tabBar()->hide();
+    auto detailNavigation=new QWidget(detailPanel);
+    detailNavigation->setObjectName(QStringLiteral("detailsNavigation"));
+    auto navigationLayout=new QGridLayout(detailNavigation);
+    navigationLayout->setContentsMargins(0,0,0,0);navigationLayout->setSpacing(3);
+    auto navigationGroup=new QButtonGroup(detailNavigation);
+    navigationGroup->setExclusive(true);
+    for(int index=0;index<detailTabs->count();++index){
+        auto button=new QPushButton(detailTabs->tabText(index),detailNavigation);
+        button->setObjectName(QStringLiteral("detailsPageButton%1").arg(index));
+        button->setCheckable(true);button->setChecked(index==detailTabs->currentIndex());
+        button->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
+        navigationGroup->addButton(button,index);
+        navigationLayout->addWidget(button,index/3,index%3);
+    }
+    for(int column=0;column<3;++column)navigationLayout->setColumnStretch(column,1);
+    connect(navigationGroup,&QButtonGroup::idClicked,detailTabs,&QTabWidget::setCurrentIndex);
+    connect(detailTabs,&QTabWidget::currentChanged,detailNavigation,[navigationGroup](int index){
+        if(auto button=navigationGroup->button(index))button->setChecked(true);
+    });
+    detailLayout->addWidget(detailNavigation);detailLayout->addWidget(detailTabs,1);
     auto hintGroup=new QGroupBox(QStringLiteral("三维操作"));auto hintLayout=new QVBoxLayout(hintGroup);
     hintGroup->setObjectName(QStringLiteral("viewOperationHints"));
     hintLayout->addWidget(hint);detailLayout->addWidget(hintGroup);

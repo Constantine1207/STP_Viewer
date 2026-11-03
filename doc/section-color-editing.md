@@ -23,6 +23,8 @@
 - `stp_section_color_integration_tests`：实际鼠标选面与 Esc、控制器联动、颜色对话框和多选撤销/重做/恢复、实际封盖像素及贯通孔、透明度/重建网格、文件菜单另存并回读、标签页隔离和未保存关闭提示。
 - Windows 云端默认执行 7 项 CTest 和全部 7 组 GUI 回归：位置/背景、剖切/颜色、Viewer、测量、Workspace、Appearance、Layout。每组单独写入结果；发生失败仍收集其余 GUI 结果，但不继续生成通过验收的交付包。`-SkipGuiTests -RunFeatureGuiTests` 仍可供局部开发时只运行两组专项 GUI。核心测试和便携包图形/测量/单 EXE 自检继续执行。
 
+右侧“属性与标注”的功能入口固定分为两排：第一排“工程信息 / PMI 标注 / 剖切设置”，第二排“位置编辑 / 测量 / 测量记录”。点击入口切换下方内容，当前入口保持选中；工具栏打开功能时也同步更新选中状态。
+
 ## 历史未通过项的修正
 
 2026-11-02 在未修改应用代码的基线上重新开启 Windows 完整 GUI 回归，复现了 Workspace 问题（[运行记录](https://github.com/Constantine1207/STP_Viewer/actions/runs/41435628110)）：
