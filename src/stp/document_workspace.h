@@ -43,7 +43,7 @@ private:
     CadJobQueue* m_jobs = nullptr;
     QStackedWidget* m_pages = nullptr;
     QTabWidget* m_tabs = nullptr;
-    QMenu *m_viewMenu = nullptr, *m_helpMenu = nullptr;
+    QMenu *m_viewMenu = nullptr, *m_helpMenu = nullptr, *m_processingMenu = nullptr;
     QMenuBar* m_nativeMenu = nullptr;
     QAction *m_open = nullptr, *m_closeCurrent = nullptr, *m_closeAll = nullptr;
     QAction *m_bom = nullptr, *m_parts = nullptr, *m_assembly = nullptr;

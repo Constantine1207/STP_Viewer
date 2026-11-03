@@ -14,11 +14,11 @@ endif()
 add_library(stp_core STATIC
     src/stp/cad_document.cpp src/stp/bom_export.cpp src/stp/part_export.cpp src/stp/pmi.cpp
     src/stp/measurement.cpp src/stp/part_placement.cpp src/stp/assembly_export.cpp
-    src/stp/color_edits.cpp src/stp/section_state.cpp)
+    src/stp/color_edits.cpp src/stp/section_state.cpp src/stp/customer_envelope.cpp)
 target_include_directories(stp_core PUBLIC src src/stp "${OpenCASCADE_INCLUDE_DIR}")
 target_link_libraries(stp_core PUBLIC Qt6::Core Qt6::Gui STP::xlsxwriter
     TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKMesh
-    TKShHealing TKService TKV3d TKOpenGl TKCDF TKLCAF TKCAF TKVCAF TKXCAF TKXSBase TKDESTEP)
+    TKShHealing TKBO TKBool TKService TKV3d TKOpenGl TKCDF TKLCAF TKCAF TKVCAF TKXCAF TKXSBase TKDESTEP)
 target_compile_features(stp_core PUBLIC cxx_std_17)
 if(MSVC)
     target_compile_options(stp_core PUBLIC /utf-8)
@@ -26,6 +26,7 @@ if(MSVC)
 endif()
 
 add_library(stp_view STATIC
+    src/stp/envelope_dialog.cpp src/stp/envelope_dialog.h
     src/stp/part_transform_panel.cpp src/stp/part_transform_panel.h
     src/stp/section_panel.cpp src/stp/section_panel.h
     src/stp/viewer_widget.cpp src/stp/viewer_widget.h
@@ -71,6 +72,16 @@ if(WIN32)
 endif()
 if(STP_BUILD_TESTS)
     enable_testing()
+    add_executable(stp_envelope_tests tests/stp_envelope_tests.cpp)
+    target_link_libraries(stp_envelope_tests PRIVATE stp_core)
+    add_test(NAME stp_envelope_tests COMMAND stp_envelope_tests)
+    add_executable(stp_envelope_integration_tests EXCLUDE_FROM_ALL
+        tests/stp_envelope_integration_tests.cpp src/stp/main_window.cpp src/stp/main_window.h
+        src/stp/document_workspace.cpp src/stp/document_workspace.h resources/stp_grab_icons.qrc)
+    target_link_libraries(stp_envelope_integration_tests PRIVATE stp_view Qt6::Test)
+    target_include_directories(stp_envelope_integration_tests PRIVATE src "${CMAKE_BINARY_DIR}")
+    target_compile_definitions(stp_envelope_integration_tests PRIVATE STP_OCCT_RESOURCE_DIR="${STP_DEPS_PREFIX}/share/opencascade/resources")
+    set_target_properties(stp_envelope_integration_tests PROPERTIES AUTOMOC ON AUTORCC ON)
     add_executable(stp_section_color_tests tests/stp_section_color_tests.cpp)
     target_link_libraries(stp_section_color_tests PRIVATE stp_core)
     add_test(NAME stp_section_color_tests COMMAND stp_section_color_tests)

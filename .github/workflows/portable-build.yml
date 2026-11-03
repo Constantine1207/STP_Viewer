@@ -1,7 +1,7 @@
 name: Portable desktop build
 on:
   push:
-    branches: [main, feature/section-color-editing, fix/workspace-regression, feature/details-two-rows]
+    branches: [main, feature/section-color-editing, fix/workspace-regression, feature/details-two-rows, feature/customer-envelope]
   workflow_dispatch:
     inputs:
       build_macos:
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: STPViewer-reviewed-windows-x64
+          name: STPViewer-envelope-windows-x64
           path: |
             dist/*.exe*
             dist/*.zip*
@@ -101,7 +101,7 @@ jobs:
         run: |
           export PATH="$PWD/.tools/venv/bin:$PATH"
           cmake -C .deps/paths.cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DSTP_BUILD_TESTS=ON
-          cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests stp_placement_tests stp_transform_panel_tests stp_section_color_tests --parallel 3
+          cmake --build build --target STPViewer stp_core_tests stp_measurement_tests stp_pmi_tests stp_job_queue_tests stp_placement_tests stp_transform_panel_tests stp_section_color_tests stp_envelope_tests --parallel 3
           ctest --test-dir build --output-on-failure
       - name: Create portable ZIP
         run: bash scripts/package-macos.sh build/STPViewer.app
