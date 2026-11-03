@@ -57,10 +57,18 @@ int main(int argc,char** argv){
                 require(bool(dialog->result()),"no result: see envelope report");
                 report["geometry"]=dialog->result()->report();require(dialog->result()->outputSolids==1&&dialog->result()->filledCavities==1,"wrong shell result");
                 auto viewer=control<Stp::ViewerWidget>(dialog,"envelopeViewer");
+                require(!viewer->sectionState().enabled,"default off section was enabled");
+                for(int i=1;i<=3;++i){axis->setCurrentIndex(i);const auto state=viewer->sectionState();
+                    require(state.enabled&&std::abs(Stp::sectionPlane(state).Axis().Direction().Coord(i))>.999,"section axis mapping wrong");
+                    require(std::abs(Stp::sectionPlane(state).Location().Coord(i)-10)<1.e-3,"section offset wrong");}
+                auto reverse=control<QCheckBox>(dialog,"envelopeSectionReverse");reverse->setChecked(false);
+                require(Stp::sectionPlane(viewer->sectionState()).Axis().Direction().Z()>.999,"reverse did not toggle");reverse->setChecked(true);
+                axis->setCurrentIndex(0);require(!viewer->sectionState().enabled,"section off did not disable clipping");
                 axis->setCurrentIndex(3);QTest::qWait(100);
                 require(dialog->grab().save(output+"/envelope-result.png"),"result screenshot");
                 require(viewer->saveScreenshot(output+"/envelope-result-model.png"),"model screenshot");
                 mode->setCurrentIndex(1);waitFor([&]{return mode->isEnabled();});
+                require(viewer->sectionState().enabled&&Stp::sectionPlane(viewer->sectionState()).Axis().Direction().Z()<-.999,"section not restored on preview switch");
                 require(dialog->grab().save(output+"/envelope-original.png"),"original screenshot");
                 mode->setCurrentIndex(0);waitFor([&]{return mode->isEnabled();});
                 require(!save->isEnabled(),"review gate ignored");review->setChecked(true);require(save->isEnabled(),"review not accepted");
@@ -69,6 +77,7 @@ int main(int argc,char** argv){
                 QTest::mouseClick(save,Qt::LeftButton);waitFor([&]{return generate->isEnabled();});require(QFile::exists(path),"GUI export did not write file");
                 auto read=Stp::loadStep(path,{},cancel);require(read->parts.size()==1&&read->parts[0].name=="CustomerEnvelope","GUI export leaked assembly");
                 report["menuPreviewSectionAndStepExport"]=true;
+                report["allSectionAxesOffsetReverseAndOff"]=true;
                 fill->setChecked(false);require(!dialog->result()&&!save->isEnabled()&&!review->isChecked(),"changed settings kept stale export");
                 QTest::mouseClick(generate,Qt::LeftButton);waitFor([&]{return generate->isEnabled();});
                 require(dialog->result()&&dialog->result()->outputSolids==3,"fill option not applied");

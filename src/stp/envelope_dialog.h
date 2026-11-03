@@ -19,7 +19,7 @@ private:
     CadJobQueue* m_jobs;quint64 m_owner;
     ViewerWidget* m_view;
     QComboBox *m_scope,*m_mode,*m_axis;
-    QCheckBox *m_fill,*m_review;
+    QCheckBox *m_fill,*m_review,*m_reverse;
     QPushButton *m_generate,*m_save,*m_cancel,*m_color;
     QTextEdit* m_report;QProgressBar* m_progress;QSlider* m_offset;
     EnvelopeOptions m_options;

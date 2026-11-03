@@ -41,6 +41,7 @@ EnvelopeDialog::EnvelopeDialog(std::shared_ptr<CadDocument> doc,PlacementEdits e
     auto preview=new QHBoxLayout;m_mode=new QComboBox;m_mode->setObjectName("envelopePreviewMode");m_mode->addItems({QStringLiteral("外包络结果"),QStringLiteral("处理范围原几何（统一颜色）")});preview->addWidget(m_mode);
     auto fit=new QPushButton(QStringLiteral("适配窗口"));preview->addWidget(fit);
     m_axis=new QComboBox;m_axis->setObjectName("envelopeSectionAxis");m_axis->addItems({QStringLiteral("关闭剖切"),QStringLiteral("X 剖切"),QStringLiteral("Y 剖切"),QStringLiteral("Z 剖切")});preview->addWidget(m_axis);
+    m_reverse=new QCheckBox(QStringLiteral("反向"));m_reverse->setObjectName("envelopeSectionReverse");m_reverse->setChecked(true);preview->addWidget(m_reverse);
     m_offset=new QSlider(Qt::Horizontal);m_offset->setObjectName("envelopeSectionOffset");m_offset->setRange(0,100);m_offset->setValue(50);preview->addWidget(m_offset,1);layout->addLayout(preview);
     m_review=new QCheckBox(QStringLiteral("我已通过剖切检查内部空间及安装接口，确认此结果可用于客户交付"));m_review->setObjectName("envelopeReviewed");layout->addWidget(m_review);
     m_progress=new QProgressBar;m_progress->setObjectName("envelopeProgress");m_progress->setRange(0,100);layout->addWidget(m_progress);
@@ -57,8 +58,9 @@ EnvelopeDialog::EnvelopeDialog(std::shared_ptr<CadDocument> doc,PlacementEdits e
     connect(m_review,&QCheckBox::toggled,this,&EnvelopeDialog::refresh);
     connect(m_mode,&QComboBox::currentIndexChanged,this,&EnvelopeDialog::showPreview);
     connect(fit,&QPushButton::clicked,m_view,&ViewerWidget::fitAll);
-    const auto section=[this]{m_view->setSection(m_axis->currentIndex(),m_offset->value(),false,true);};
+    const auto section=[this]{m_view->setSection(m_axis->currentIndex()-1,m_offset->value(),m_reverse->isChecked(),true);};
     connect(m_axis,&QComboBox::currentIndexChanged,this,section);connect(m_offset,&QSlider::valueChanged,this,section);
+    connect(m_reverse,&QCheckBox::toggled,this,section);
     connect(m_view,&ViewerWidget::sceneReady,this,[this,section]{m_rendering=false;section();refresh();});
     connect(m_view,&ViewerWidget::sceneBuildCancelled,this,[this]{m_rendering=false;refresh();});
     connect(m_jobs,&CadJobQueue::ownerDrained,this,[this](quint64 owner){if(owner==m_owner)finishClose();});
@@ -70,6 +72,7 @@ void EnvelopeDialog::refresh(){
     for(auto w:std::initializer_list<QWidget*>{m_scope,m_fill,m_color,m_generate})w->setEnabled(ready);
     m_mode->setEnabled(ready&&bool(m_result));m_review->setEnabled(ready&&bool(m_result));
     m_axis->setEnabled(ready&&bool(m_result));m_offset->setEnabled(ready&&bool(m_result));
+    m_reverse->setEnabled(ready&&bool(m_result));
     m_save->setEnabled(ready&&bool(m_result)&&m_review->isChecked());m_cancel->setEnabled(m_busy&&!m_closing);
     m_progress->setVisible(m_busy);
 }
