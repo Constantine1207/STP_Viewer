@@ -41,6 +41,7 @@ public:
     quint64 sessionId() const { return m_owner; }
     std::shared_ptr<CadDocument> document() const { return m_document; }
     QMenu* documentViewMenu() const;
+    QMenu* documentProcessingMenu() const;
     QMenu* documentHelpMenu() const;
     int appearanceUndoCount() const { return int(m_appearanceHistory.size()); }
     bool hasPlacementChanges() const;
@@ -69,6 +70,8 @@ private:
     void saveBom();
     void saveParts();
     void saveAssembly(bool closeAfter = false);
+    void openCustomerEnvelope();
+    QAction* m_envelopeAction = nullptr;
     void openPlacementPanel();
     void updatePlacementActions();
     PartTransformPanel* m_transformPanel = nullptr;

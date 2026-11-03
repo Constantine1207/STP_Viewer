@@ -78,9 +78,9 @@ try {
     $Build = Join-Path $Root 'build-windows'
     Invoke-StpNative $Cmake @('-C', (Join-Path $Root '.deps/paths.cmake'), '-S', $Root, '-B', $Build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DSTP_BUILD_TESTS=ON') (Join-Path $Validation 'configure') | Out-Null
     Add-Check 'configure' 'passed' @{ generator='Ninja'; configuration='Release' }
-    $Targets = @('STPViewer', 'stp_core_tests', 'stp_measurement_tests', 'stp_pmi_tests', 'stp_job_queue_tests', 'stp_placement_tests', 'stp_transform_panel_tests', 'stp_section_color_tests')
-    if (-not $SkipGuiTests) { $Targets += @('stp_section_color_integration_tests', 'stp_editing_integration_tests', 'stp_viewer_tests', 'stp_workspace_tests', 'stp_appearance_tests', 'stp_layout_tests', 'stp_measurement_integration_tests') }
-    if ($SkipGuiTests -and $RunFeatureGuiTests) { $Targets += @('stp_section_color_integration_tests', 'stp_editing_integration_tests') }
+    $Targets = @('STPViewer', 'stp_core_tests', 'stp_measurement_tests', 'stp_pmi_tests', 'stp_job_queue_tests', 'stp_placement_tests', 'stp_transform_panel_tests', 'stp_section_color_tests', 'stp_envelope_tests')
+    if (-not $SkipGuiTests) { $Targets += @('stp_envelope_integration_tests', 'stp_section_color_integration_tests', 'stp_editing_integration_tests', 'stp_viewer_tests', 'stp_workspace_tests', 'stp_appearance_tests', 'stp_layout_tests', 'stp_measurement_integration_tests') }
+    if ($SkipGuiTests -and $RunFeatureGuiTests) { $Targets += @('stp_envelope_integration_tests', 'stp_section_color_integration_tests', 'stp_editing_integration_tests') }
     Invoke-StpNative $Cmake (@('--build', $Build, '--target') + $Targets + @('--parallel', [string]$Jobs)) (Join-Path $Validation 'build') -TimeoutSeconds 14400 | Out-Null
     Add-Check 'application-and-regression-build' 'passed' @{ targets=$Targets }
     $Qt = Join-Path $Root ".deps/qt/$($Lock.qt.version)/msvc2022_64"
@@ -91,6 +91,7 @@ try {
     Invoke-StpNative $Ctest @('--test-dir', $Build, '--output-on-failure', '--output-junit', (Join-Path $Validation 'ctest.xml')) (Join-Path $Validation 'ctest') | Out-Null
     Add-Check 'core-and-pmi-ctest' 'passed' @{ junit='validation/windows/ctest.xml'; logs='validation/windows/ctest.*.log' }
     if (-not $SkipGuiTests -or $RunFeatureGuiTests) {
+        Invoke-GuiRegression 'customer-envelope-gui-and-step-roundtrip' 'stp_envelope_integration_tests.exe' @((Join-Path $Validation 'envelope')) 'envelope-tests' @{ report='validation/windows/envelope/envelope-report.json'; evidence='validation/windows/envelope' } 300
         Invoke-GuiRegression 'interactive-editing-regression' 'stp_editing_integration_tests.exe' @((Join-Path $Root 'samples/colored-assembly.step'), (Join-Path $Validation 'editing')) 'editing-tests' @{ evidence='validation/windows/editing' } 300
         Invoke-GuiRegression 'section-color-gui-and-step-roundtrip' 'stp_section_color_integration_tests.exe' @((Join-Path $Validation 'section-color')) 'section-color-tests' @{ report='validation/windows/section-color/section-color-report.json'; evidence='validation/windows/section-color' } 300
     }

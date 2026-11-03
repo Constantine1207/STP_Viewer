@@ -3,6 +3,7 @@
 #include "section_panel.h"
 #include <QUndoCommand>
 #include "assembly_export.h"
+#include "envelope_dialog.h"
 #include <QColorDialog>
 #include <QSettings>
 #if defined(Q_OS_MACOS)
@@ -272,6 +273,9 @@ void MainWindow::buildUi()
     fileMenu->addAction(m_saveAssemblyAction);
     fileMenu->addSeparator(); fileMenu->addAction(QStringLiteral("退出"),this,&QWidget::close);
     auto viewMenu=menuBar()->addMenu(QStringLiteral("视图")); viewMenu->setObjectName("viewMenu");
+    auto processingMenu=menuBar()->addMenu(QStringLiteral("模型处理"));processingMenu->setObjectName("processingMenu");
+    m_envelopeAction=toolbar->addAction(QStringLiteral("客户外包络…"),this,&MainWindow::openCustomerEnvelope);
+    m_envelopeAction->setObjectName("customerEnvelope");m_envelopeAction->setEnabled(false);processingMenu->addAction(m_envelopeAction);
     viewMenu->addAction(m_undoAppearanceAction);viewMenu->addAction(m_resetAppearanceAction);viewMenu->addSeparator();
     viewMenu->addAction(m_transformAction);
     auto backgroundMenu=viewMenu->addMenu(QStringLiteral("背景颜色"));backgroundMenu->setObjectName("backgroundMenu");
@@ -1009,6 +1013,7 @@ void MainWindow::commitManualEditor()
 }
 
 QMenu* MainWindow::documentViewMenu() const { return menuBar()->findChild<QMenu*>(QStringLiteral("viewMenu")); }
+QMenu* MainWindow::documentProcessingMenu() const { return menuBar()->findChild<QMenu*>(QStringLiteral("processingMenu")); }
 QMenu* MainWindow::documentHelpMenu() const { return menuBar()->findChild<QMenu*>(QStringLiteral("helpMenu")); }
 
 void MainWindow::cancelPendingMeasurementForSessionSwitch()
@@ -1314,10 +1319,21 @@ void MainWindow::updatePlacementActions()
 {
     const bool ready=m_document&&m_placementSceneReady&&!m_busy&&!m_closePending;
     m_transformAction->setEnabled(ready);m_saveAssemblyAction->setEnabled(ready);
+    if(m_envelopeAction)m_envelopeAction->setEnabled(ready);
     if(m_transformPanel)m_transformPanel->setSceneEnabled(ready);
     if(m_sectionPanel)m_sectionPanel->setEnabled(ready);
     if(m_sectionAction)m_sectionAction->setEnabled(ready);
     updateColorActions();
+}
+
+void MainWindow::openCustomerEnvelope()
+{
+    if(!m_envelopeAction->isEnabled())return;
+    m_transformPanel->cancelPreview();m_view->cancelSectionPlanePick();m_view->finishPartDrag();
+    cancelPendingMeasurementForSessionSwitch();
+    // Application-modal snapshot prevents placement/scope edits while a preview is being reviewed.
+    EnvelopeDialog dialog(m_document,m_transformPanel->committedEdits(),m_view->selectedOccurrences(),m_jobs,this);
+    dialog.exec();
 }
 
 void MainWindow::openPlacementPanel()

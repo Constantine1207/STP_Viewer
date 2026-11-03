@@ -94,7 +94,9 @@ DocumentWorkspace::DocumentWorkspace(QWidget* parent) : QMainWindow(parent)
     m_assembly->setObjectName("workspaceSaveAssembly");
     m_bom->setObjectName("workspaceExportBom");m_parts->setObjectName("workspaceExportParts");
     file->addSeparator();auto quit=file->addAction(QStringLiteral("退出"),this,&QWidget::close);quit->setShortcut(QKeySequence::Quit);quit->setMenuRole(QAction::QuitRole);
-    m_viewMenu=m_nativeMenu->addMenu(QStringLiteral("视图"));m_helpMenu=m_nativeMenu->addMenu(QStringLiteral("帮助"));
+    m_viewMenu=m_nativeMenu->addMenu(QStringLiteral("视图"));
+    m_processingMenu=m_nativeMenu->addMenu(QStringLiteral("模型处理"));
+    m_helpMenu=m_nativeMenu->addMenu(QStringLiteral("帮助"));
     for(auto action:{m_open,m_closeCurrent,m_closeAll,m_bom,m_parts,m_assembly,quit}){
         action->setParent(this);addAction(action);
     }
@@ -167,9 +169,10 @@ void DocumentWorkspace::updateActiveDocument()
     }
     m_previous=currentDocument();
     m_pages->setCurrentIndex(documentCount()?1:0);
-    removeMenuActions(m_viewMenu);removeMenuActions(m_helpMenu);
+    removeMenuActions(m_viewMenu);removeMenuActions(m_helpMenu);removeMenuActions(m_processingMenu);
     if(auto doc=currentDocument()){
         for(auto action:doc->documentViewMenu()->actions())m_viewMenu->addAction(action);
+        for(auto action:doc->documentProcessingMenu()->actions())m_processingMenu->addAction(action);
         for(auto action:doc->documentHelpMenu()->actions())m_helpMenu->addAction(action);
         setWindowTitle(QFileInfo(m_paths.value(doc)).fileName()+QStringLiteral(" — STP Viewer"));
     }else setWindowTitle(QStringLiteral("STP Viewer · 离线工程查看器"));
@@ -185,6 +188,7 @@ void DocumentWorkspace::updateActions()
     m_parts->setEnabled(doc&&!m_quitting&&doc->findChild<QAction*>("exportParts")->isEnabled());
     m_assembly->setEnabled(doc&&!m_quitting&&doc->findChild<QAction*>("saveAssemblyStep")->isEnabled());
     m_viewMenu->setEnabled(doc&&!m_quitting);m_helpMenu->setEnabled(doc&&!m_quitting);
+    m_processingMenu->setEnabled(doc&&!m_quitting);
 }
 
 void DocumentWorkspace::updateLabels()
