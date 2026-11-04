@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <optional>
 #include "color_edits.h"
+#include "customer_envelope.h"
 #include <QUndoStack>
 
 class QAction; class QCheckBox; class QComboBox; class QLabel; class QLineEdit;
@@ -71,6 +72,7 @@ private:
     void saveParts();
     void saveAssembly(bool closeAfter = false);
     void openCustomerEnvelope();
+    EnvelopeOptions m_envelopeOptions;
     QAction* m_envelopeAction = nullptr;
     void openPlacementPanel();
     void updatePlacementActions();
