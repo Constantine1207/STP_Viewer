@@ -250,8 +250,11 @@ std::shared_ptr<CadDocument> envelopeDocument(const EnvelopeResult& result,const
     XCAFDoc_DocumentTool::Set(d->xde->Main());XCAFDoc_DocumentTool::SetLengthUnit(d->xde,.001);
     auto shapes=XCAFDoc_DocumentTool::ShapeTool(d->xde->Main());auto colors=XCAFDoc_DocumentTool::ColorTool(d->xde->Main());
     TDF_Label root;
-    if(result.pieces.size()>1){TopoDS_Compound c;BRep_Builder().MakeCompound(c);root=shapes->AddShape(c,false);
-        TDataStd_Name::Set(root,TCollection_ExtendedString("CustomerAssembly"));}
+    TopoDS_Compound assembly;BRep_Builder().MakeCompound(assembly);root=shapes->AddShape(assembly,false);
+    TDataStd_Name::Set(root,TCollection_ExtendedString("CustomerAssembly"));
+    const auto rootColor=result.pieces.front().color;
+    for(auto type:{XCAFDoc_ColorGen,XCAFDoc_ColorSurf,XCAFDoc_ColorCurv})
+        colors->SetColor(root,Quantity_Color(rootColor.redF(),rootColor.greenF(),rootColor.blueF(),Quantity_TOC_sRGB),type);
     int n=0;for(const auto& piece:result.pieces){
         BRepBuilderAPI_Copy copy(piece.shape,true,false);
         // AddShape may create a reference for located geometry and name only the
@@ -260,9 +263,10 @@ std::shared_ptr<CadDocument> envelopeDocument(const EnvelopeResult& result,const
         const auto name=piece.sourceOccurrence<0?QStringLiteral("CustomerEnvelope"):QStringLiteral("RetainedPart%1").arg(++n);
         TDataStd_Name::Set(label,TCollection_ExtendedString(name.toUtf8().constData()));
         const auto c=piece.color;const Quantity_Color rgb(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB);
-        colors->SetColor(label,rgb,XCAFDoc_ColorGen);
+        for(auto type:{XCAFDoc_ColorGen,XCAFDoc_ColorSurf,XCAFDoc_ColorCurv})colors->SetColor(label,rgb,type);
         if(!root.IsNull()){const auto component=shapes->AddComponent(root,label,TopLoc_Location());
-            TDataStd_Name::Set(component,TCollection_ExtendedString(name.toUtf8().constData()));colors->SetColor(component,rgb,XCAFDoc_ColorGen);}
+            TDataStd_Name::Set(component,TCollection_ExtendedString(name.toUtf8().constData()));
+            for(auto type:{XCAFDoc_ColorGen,XCAFDoc_ColorSurf,XCAFDoc_ColorCurv})colors->SetColor(component,rgb,type);}
     }shapes->UpdateAssemblies();rebuildIndex(*d);return d;
 }
 void exportCustomerEnvelope(const EnvelopeResult& r,const EnvelopeOptions& options,const QString& path,
@@ -302,7 +306,7 @@ void exportCustomerEnvelope(const EnvelopeResult& r,const EnvelopeOptions& optio
                 for(int k=0;k<6;++k)if(std::abs(before[k]-after[k])>1.e-4)throw std::runtime_error("STEP 回读的独立形体位置不一致，未保存");
                 const auto color=occurrenceBaseColor(*read,int(i));
                 if(std::abs(color.red()-piece.color.red())>1||std::abs(color.green()-piece.color.green())>1||std::abs(color.blue()-piece.color.blue())>1)
-                    throw std::runtime_error("STEP 回读的实例颜色不一致，未保存");
+                    throw std::runtime_error(QStringLiteral("STEP 回读颜色不一致：%1，预期 %2，读取 %3，文件 %4；未保存").arg(name,piece.color.name(),color.name(),QFileInfo(path).fileName()).toStdString());
             }if(!found)throw std::runtime_error("STEP 回读缺少独立形体，未保存");
         }
     }
