@@ -88,8 +88,11 @@ template<class Operation> TopoDS_Shape booleanResult(const TopoDS_Shape& a,const
     check(cancel);TopTools_ListOfShape args,tools;args.Append(a);tools.Append(b);
     Operation op;op.SetArguments(args);op.SetTools(tools);op.SetNonDestructive(true);op.SetRunParallel(false);
     Handle(Progress) p=new Progress(cancel);op.Build(p->Start());check(cancel);
-    if(!op.IsDone()||op.HasErrors()||op.HasWarnings()||op.Shape().IsNull()||!BRepCheck_Analyzer(op.Shape()).IsValid())
-        throw std::runtime_error("保护空间或重叠检查失败，请检查工具实体及接触边界");
+    if(!op.IsDone()||op.HasErrors()||op.HasWarnings()||op.Shape().IsNull()){
+        std::ostringstream detail;op.DumpErrors(detail);op.DumpWarnings(detail);
+        throw std::runtime_error("保护空间或重叠检查失败："+detail.str());
+    }
+    if(!BRepCheck_Analyzer(op.Shape()).IsValid())throw std::runtime_error("保护空间布尔结果拓扑无效");
     return op.Shape();
 }
 double commonVolume(const TopoDS_Shape& a,const TopoDS_Shape& b,std::atomic_bool& cancel){
@@ -309,8 +312,14 @@ void exportCustomerEnvelope(const EnvelopeResult& r,const EnvelopeOptions& optio
             }if(!found)throw std::runtime_error("STEP 回读缺少独立形体，未保存");
         }
     }
-    for(const auto& tool:options.protections)if(commonVolume(roundtrip,tool.shape,cancel)>1.e-5)
-        throw std::runtime_error("STEP 回读的保护空间仍被材料占据，未保存");
+    if(!options.protections.empty()){
+        // Preserved parts intentionally remain separate and can overlap the body.
+        // Boolean intersection expects non-overlapping argument solids. Inspect
+        // their union, without changing the independently exported STEP pieces.
+        const auto occupied=fuse(shapes,cancel);
+        for(const auto& tool:options.protections)if(commonVolume(occupied,tool.shape,cancel)>1.e-5)
+            throw std::runtime_error("STEP 回读的保护空间仍被材料占据，未保存");
+    }
     check(cancel);QSaveFile out(path);if(!out.open(QIODevice::WriteOnly))throw std::runtime_error(out.errorString().toStdString());
     for(size_t i=0;i<bytes.size();i+=1048576){check(cancel);const auto n=std::min(size_t(1048576),bytes.size()-i);
         if(out.write(bytes.data()+i,qint64(n))!=qint64(n))throw std::runtime_error("STEP 保存失败");}

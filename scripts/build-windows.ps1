@@ -81,13 +81,17 @@ try {
     $Targets = @('STPViewer', 'stp_core_tests', 'stp_measurement_tests', 'stp_pmi_tests', 'stp_job_queue_tests', 'stp_placement_tests', 'stp_transform_panel_tests', 'stp_section_color_tests', 'stp_envelope_tests')
     if (-not $SkipGuiTests) { $Targets += @('stp_envelope_integration_tests', 'stp_section_color_integration_tests', 'stp_editing_integration_tests', 'stp_viewer_tests', 'stp_workspace_tests', 'stp_appearance_tests', 'stp_layout_tests', 'stp_measurement_integration_tests') }
     if ($SkipGuiTests -and $RunFeatureGuiTests) { $Targets += @('stp_envelope_integration_tests', 'stp_section_color_integration_tests', 'stp_editing_integration_tests') }
-    Invoke-StpNative $Cmake (@('--build', $Build, '--target') + $Targets + @('--parallel', [string]$Jobs)) (Join-Path $Validation 'build') -TimeoutSeconds 14400 | Out-Null
-    Add-Check 'application-and-regression-build' 'passed' @{ targets=$Targets }
     $Qt = Join-Path $Root ".deps/qt/$($Lock.qt.version)/msvc2022_64"
     $Prefix = Join-Path $Root '.deps/install'
     $env:PATH = "$(Join-Path $Prefix 'bin');$(Join-Path $Qt 'bin');$env:PATH"
     $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $Qt 'plugins/platforms'
     $env:CSF_ShadersDirectory = Join-Path $Prefix 'share/opencascade/resources/Shaders'
+    # Fail early on exact geometry/STEP regressions before compiling every GUI executable.
+    Invoke-StpNative $Cmake @('--build', $Build, '--target', 'stp_envelope_tests', '--parallel', [string]$Jobs) (Join-Path $Validation 'envelope-preflight-build') -TimeoutSeconds 14400 | Out-Null
+    Invoke-StpNative $Ctest @('--test-dir', $Build, '-R', '^stp_envelope_tests$', '--output-on-failure') (Join-Path $Validation 'envelope-preflight') | Out-Null
+    Add-Check 'envelope-geometry-preflight' 'passed' @{ logs='validation/windows/envelope-preflight.*.log' }
+    Invoke-StpNative $Cmake (@('--build', $Build, '--target') + $Targets + @('--parallel', [string]$Jobs)) (Join-Path $Validation 'build') -TimeoutSeconds 14400 | Out-Null
+    Add-Check 'application-and-regression-build' 'passed' @{ targets=$Targets }
     Invoke-StpNative $Ctest @('--test-dir', $Build, '--output-on-failure', '--output-junit', (Join-Path $Validation 'ctest.xml')) (Join-Path $Validation 'ctest') | Out-Null
     Add-Check 'core-and-pmi-ctest' 'passed' @{ junit='validation/windows/ctest.xml'; logs='validation/windows/ctest.*.log' }
     if (-not $SkipGuiTests -or $RunFeatureGuiTests) {
