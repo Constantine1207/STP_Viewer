@@ -252,19 +252,18 @@ std::shared_ptr<CadDocument> envelopeDocument(const EnvelopeResult& result,const
     TDF_Label root;
     TopoDS_Compound assembly;BRep_Builder().MakeCompound(assembly);root=shapes->AddShape(assembly,false);
     TDataStd_Name::Set(root,TCollection_ExtendedString("CustomerAssembly"));
-    const auto rootColor=result.pieces.front().color;
-    for(auto type:{XCAFDoc_ColorGen,XCAFDoc_ColorSurf,XCAFDoc_ColorCurv})
-        colors->SetColor(root,Quantity_Color(rootColor.redF(),rootColor.greenF(),rootColor.blueF(),Quantity_TOC_sRGB),type);
     int n=0;for(const auto& piece:result.pieces){
         BRepBuilderAPI_Copy copy(piece.shape,true,false);
-        // AddShape may create a reference for located geometry and name only the
-        // reference, leaving the definition with an automatic SOLID name.
-        const auto label=shapes->NewShape();shapes->SetShape(label,copy.Shape());
+        // XDE definitions are unlocated. Put the exact world placement on the
+        // component so STEP's representation/style lookup finds the definition.
+        // Naming a located AddShape reference also leaves its definition unnamed.
+        const TopLoc_Location placement=copy.Shape().Location();
+        const auto label=shapes->NewShape();shapes->SetShape(label,copy.Shape().Located(TopLoc_Location()));
         const auto name=piece.sourceOccurrence<0?QStringLiteral("CustomerEnvelope"):QStringLiteral("RetainedPart%1").arg(++n);
         TDataStd_Name::Set(label,TCollection_ExtendedString(name.toUtf8().constData()));
         const auto c=piece.color;const Quantity_Color rgb(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB);
         for(auto type:{XCAFDoc_ColorGen,XCAFDoc_ColorSurf,XCAFDoc_ColorCurv})colors->SetColor(label,rgb,type);
-        if(!root.IsNull()){const auto component=shapes->AddComponent(root,label,TopLoc_Location());
+        if(!root.IsNull()){const auto component=shapes->AddComponent(root,label,placement);
             TDataStd_Name::Set(component,TCollection_ExtendedString(name.toUtf8().constData()));
             for(auto type:{XCAFDoc_ColorGen,XCAFDoc_ColorSurf,XCAFDoc_ColorCurv})colors->SetColor(component,rgb,type);}
     }shapes->UpdateAssemblies();rebuildIndex(*d);return d;

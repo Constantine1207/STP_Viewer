@@ -72,6 +72,14 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     require(f.open(QIODevice::ReadOnly)&&f.readAll()==bytes,"failed export replaced destination");f.close();
     Stp::exportCustomerEnvelope(gap,options,dir.filePath("multi.step"),doc.sourcePath,cancel);
     Stp::exportCustomerEnvelope(moved,options,dir.filePath("moved.step"),doc.sourcePath,cancel);
+    // Located definitions lose STEP instance styles unless the location is on
+    // the assembly component. Verify all channels, not just the first channel.
+    const auto movedRead=Stp::loadStep(dir.filePath("moved.step"),{},cancel);
+    int movedCount=0;for(size_t i=0;i<movedRead->occurrences.size();++i){const auto& o=movedRead->occurrences[i];if(o.partIndex<0)continue;
+        ++movedCount;const auto c=Stp::occurrenceBaseColor(*movedRead,int(i));
+        require(std::abs(c.red()-options.color.red())<=1&&std::abs(c.green()-options.color.green())<=1&&std::abs(c.blue()-options.color.blue())<=1,"moved STEP lost RGB color");
+        require(contains(movedRead->parts[o.partIndex].shape.Moved(TopLoc_Location(o.worldTransform)),gp_Pnt(8,21,32)),"moved STEP geometry placement lost");
+    }require(movedCount==1,"moved STEP duplicate instance");
     // Per-instance preservation must not fill the connector or touch the source definition.
     Stp::EnvelopeOptions keep;const auto leaves=Stp::envelopeScope(doc,envelopeRoots(doc));
     keep.preservedOccurrences={leaves[1]};keep.preservedColors[leaves[1]]=QColor("#e04030");
@@ -91,9 +99,10 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     require(!contains(allKept.shape,gp_Pnt(10,10,10)),"all-preserved cavity filled");
     keep.preservedOccurrences={leaves[1]};auto outside=Stp::buildCustomerEnvelope(doc,{}, {leaves[0]},keep,cancel);
     require(outside.preservedOccurrences==0&&outside.processedOccurrences==1,"out-of-scope rule affected result");
-    Stp::EnvelopeOptions movedKeep;movedKeep.preservedOccurrences={leaf};
+    Stp::EnvelopeOptions movedKeep;movedKeep.preservedOccurrences={leaf};movedKeep.preservedColors[leaf]=QColor("#d02f8a");
     auto movedRetained=Stp::buildCustomerEnvelope(moveDoc,{{leaf,rotation}},{leaf},movedKeep,cancel);
     require(std::abs(movedRetained.bounds[0]-7)<1.e-6&&std::abs(movedRetained.bounds[5]-34)<1.e-6,"retained placement lost");
+    Stp::exportCustomerEnvelope(movedRetained,movedKeep,dir.filePath("moved-retained.step"),moveDoc.sourcePath,cancel);
     // Connector is a through socket entirely inside the closed housing.
     auto socket=BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(8,8,8),4,4,4).Shape(),
         BRepPrimAPI_MakeBox(gp_Pnt(9.5,9.5,7),1,1,6).Shape()).Shape();
