@@ -29,6 +29,8 @@
 #include <QDoubleSpinBox>
 #include <QTabWidget>
 #include <QDialogButtonBox>
+#include <QTreeWidget>
+#include <QMenu>
 #include <iostream>
 #include <stdexcept>
 
@@ -50,6 +52,14 @@ int main(int argc,char** argv){
         Stp::DocumentWorkspace workspace;workspace.resize(1350,950);workspace.show();workspace.openFiles({source});
         auto page=workspace.currentDocument();auto action=control<QAction>(page,"customerEnvelope");waitFor([&]{return action->isEnabled();});
         const auto sourceDocument=page->document();
+        auto tree=control<QTreeWidget>(page,"assemblyTree");
+        const auto treePosition=tree->visualItemRect(tree->topLevelItem(0)).center();
+        QMetaObject::invokeMethod(tree,"customContextMenuRequested",Q_ARG(QPoint,treePosition));
+        auto popup=control<QMenu>(page,"partAppearanceMenu");
+        control<QAction>(popup,"preserveEnvelopePart")->trigger();popup->close();QTest::qWait(20);
+        QMetaObject::invokeMethod(tree,"customContextMenuRequested",Q_ARG(QPoint,treePosition));
+        popup=control<QMenu>(page,"partAppearanceMenu");control<QAction>(popup,"restoreEnvelopePart")->trigger();popup->close();QTest::qWait(20);
+        report["treePreserveAndRestoreActions"]=true;
         auto release=std::make_shared<std::atomic_bool>(false);
         QTimer::singleShot(0,[&]{
             auto dialog=control<Stp::EnvelopeDialog>(page,"customerEnvelopeDialog");
@@ -97,7 +107,8 @@ int main(int argc,char** argv){
                 control<QPushButton>(dialog,"envelopeAddBox")->click();require(toolEntered,"box editor not opened");
                 auto tools=control<QListWidget>(dialog,"envelopeProtections");require(tools->count()==1&&!dialog->result(),"tool not added");
                 generate->click();waitFor([&]{return generate->isEnabled();});require(bool(dialog->result()),"non-intersecting protection rejected");
-                mode->setCurrentIndex(2);waitFor([&]{return mode->isEnabled();});
+                axis->setCurrentIndex(0);mode->setCurrentIndex(2);waitFor([&]{return mode->isEnabled();});
+                dialog->findChild<QTabWidget*>()->setCurrentIndex(2);
                 require(dialog->grab().save(output+"/envelope-preservation-tools.png"),"protection screenshot failed");
                 tools->setCurrentRow(0);control<QPushButton>(dialog,"envelopeRemoveTool")->click();
                 require(tools->count()==0&&!dialog->result()&&!save->isEnabled(),"tool removal did not invalidate");
@@ -117,7 +128,7 @@ int main(int argc,char** argv){
                 report["optionsInvalidateAndRegenerate"]=true;
                 auto scope=control<QComboBox>(dialog,"envelopeScope");scope->setCurrentIndex(1);generate->click();
                 require(!dialog->result()&&!save->isEnabled(),"empty selection used entire assembly");
-                scope->setCurrentIndex(0);
+                scope->setCurrentIndex(0);rules->item(1)->setCheckState(Qt::Checked);
                 // Keep processing queued so cancel/close paths are deterministic, without a timing race.
                 workspace.jobQueue()->enqueue(999999,[release](std::atomic_bool& c,const Stp::ProgressCallback&){while(!release->load()&&!c.load())QThread::msleep(5);},{},{});
                 generate->click();control<QPushButton>(dialog,"envelopeCancel")->click();
@@ -130,6 +141,13 @@ int main(int argc,char** argv){
         waitFor([&]{return workspace.jobQueue()->idle();});
         require(page->document()==sourceDocument&&sourceDocument->parts.size()==3&&!page->hasPlacementChanges(),"source session modified");
         report["sourcePreserved"]=true;
+        bool persisted=false;QTimer::singleShot(0,[&]{auto dialog=control<Stp::EnvelopeDialog>(page,"customerEnvelopeDialog");
+            persisted=control<QListWidget>(dialog,"envelopePreserveList")->item(1)->checkState()==Qt::Checked;dialog->reject();});
+        action->trigger();require(persisted,"rules lost on dialog reopen");report["rulesPersistWithinSession"]=true;
+        page->beginLoadDocument(source);waitFor([&]{return action->isEnabled();});
+        bool cleared=false;QTimer::singleShot(0,[&]{auto dialog=control<Stp::EnvelopeDialog>(page,"customerEnvelopeDialog");
+            cleared=dialog->options().preservedOccurrences.empty()&&dialog->options().protections.empty();dialog->reject();});
+        action->trigger();require(cleared,"rules leaked into reloaded model");report["rulesClearOnReload"]=true;
         workspace.closeAll();waitFor([&]{return workspace.documentCount()==0&&workspace.jobQueue()->idle();});
         report["status"]="passed";
     }catch(const Standard_Failure& e){failure=QString::fromUtf8(e.GetMessageString());}catch(const std::exception& e){failure=QString::fromUtf8(e.what());}

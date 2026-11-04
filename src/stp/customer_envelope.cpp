@@ -225,19 +225,20 @@ EnvelopeResult buildCustomerEnvelope(const CadDocument& doc,const PlacementEdits
     check(cancel);if(progress)progress(80,QStringLiteral("几何处理完成，准备预览…"));return r;
 }
 QJsonObject EnvelopeResult::report() const{
-    QJsonArray box,w;for(double x:bounds)box.append(x);for(const auto& s:warnings)w.append(s);
+    QJsonArray box,originalBox,w;for(double x:bounds)box.append(x);for(double x:originalBounds)originalBox.append(x);for(const auto& s:warnings)w.append(s);
     return {{"inputOccurrences",inputOccurrences},{"inputSolids",inputSolids},{"outputSolids",outputSolids},
         {"preservedOccurrences",preservedOccurrences},{"processedOccurrences",processedOccurrences},
         {"overlapVolumeMm3",overlapVolume},{"removedVolumeMm3",removedVolume},{"removedOriginalVolumeMm3",removedOriginalVolume},
         {"filledClosedCavities",filledCavities},{"inputUnionVolumeMm3",inputVolume},{"outputVolumeMm3",outputVolume},
-        {"addedVolumeMm3",outputVolume-inputVolume},{"boundsMm",box},{"reviewRequired",true},{"warnings",w}};
+        {"addedVolumeMm3",outputVolume-inputVolume},{"boundsMm",box},{"originalBoundsMm",originalBox},{"reviewRequired",true},{"warnings",w}};
 }
 std::shared_ptr<CadDocument> envelopeDocument(const TopoDS_Shape& shape,const QColor& color){
     if(shape.IsNull()||!color.isValid())throw std::runtime_error("外包络或颜色无效");
     auto d=std::make_shared<CadDocument>();d->xde=new TDocStd_Document("BinXCAF");
     XCAFDoc_DocumentTool::Set(d->xde->Main());XCAFDoc_DocumentTool::SetLengthUnit(d->xde,.001);
     // No label/attribute cloning: source names, materials, layers, and PMI never enter this document.
-    const auto label=XCAFDoc_DocumentTool::ShapeTool(d->xde->Main())->AddShape(shape,false);
+    const auto shapes=XCAFDoc_DocumentTool::ShapeTool(d->xde->Main());
+    const auto label=shapes->NewShape();shapes->SetShape(label,shape);
     TDataStd_Name::Set(label,TCollection_ExtendedString("CustomerEnvelope"));
     XCAFDoc_DocumentTool::ColorTool(d->xde->Main())->SetColor(label,
         Quantity_Color(color.redF(),color.greenF(),color.blueF(),Quantity_TOC_sRGB),XCAFDoc_ColorGen);
@@ -248,12 +249,21 @@ std::shared_ptr<CadDocument> envelopeDocument(const EnvelopeResult& result,const
     auto d=std::make_shared<CadDocument>();d->xde=new TDocStd_Document("BinXCAF");
     XCAFDoc_DocumentTool::Set(d->xde->Main());XCAFDoc_DocumentTool::SetLengthUnit(d->xde,.001);
     auto shapes=XCAFDoc_DocumentTool::ShapeTool(d->xde->Main());auto colors=XCAFDoc_DocumentTool::ColorTool(d->xde->Main());
+    TDF_Label root;
+    if(result.pieces.size()>1){TopoDS_Compound c;BRep_Builder().MakeCompound(c);root=shapes->AddShape(c,false);
+        TDataStd_Name::Set(root,TCollection_ExtendedString("CustomerAssembly"));}
     int n=0;for(const auto& piece:result.pieces){
-        BRepBuilderAPI_Copy copy(piece.shape,true,false);const auto label=shapes->AddShape(copy.Shape(),false);
+        BRepBuilderAPI_Copy copy(piece.shape,true,false);
+        // AddShape may create a reference for located geometry and name only the
+        // reference, leaving the definition with an automatic SOLID name.
+        const auto label=shapes->NewShape();shapes->SetShape(label,copy.Shape());
         const auto name=piece.sourceOccurrence<0?QStringLiteral("CustomerEnvelope"):QStringLiteral("RetainedPart%1").arg(++n);
         TDataStd_Name::Set(label,TCollection_ExtendedString(name.toUtf8().constData()));
-        const auto c=piece.color;colors->SetColor(label,Quantity_Color(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB),XCAFDoc_ColorGen);
-    }rebuildIndex(*d);return d;
+        const auto c=piece.color;const Quantity_Color rgb(c.redF(),c.greenF(),c.blueF(),Quantity_TOC_sRGB);
+        colors->SetColor(label,rgb,XCAFDoc_ColorGen);
+        if(!root.IsNull()){const auto component=shapes->AddComponent(root,label,TopLoc_Location());
+            TDataStd_Name::Set(component,TCollection_ExtendedString(name.toUtf8().constData()));colors->SetColor(component,rgb,XCAFDoc_ColorGen);}
+    }shapes->UpdateAssemblies();rebuildIndex(*d);return d;
 }
 void exportCustomerEnvelope(const EnvelopeResult& r,const EnvelopeOptions& options,const QString& path,
     const QString& sourcePath,std::atomic_bool& cancel,const ProgressCallback& progress){
@@ -280,6 +290,24 @@ void exportCustomerEnvelope(const EnvelopeResult& r,const EnvelopeOptions& optio
     if(int(shapes.size())!=r.outputSolids||std::abs(volume(roundtrip)-r.outputVolume)>std::max(1.e-5,r.outputVolume*1.e-7))
         throw std::runtime_error("STEP 回读的实体数量或体积不一致，未保存");
     for(int k=0;k<6;++k)if(std::abs(box[k]-r.bounds[k])>1.e-4)throw std::runtime_error("STEP 回读外形边界不一致，未保存");
+    if(!r.pieces.empty()){
+        if(read->parts.size()!=r.pieces.size())throw std::runtime_error("STEP 回读的独立形体数量不一致，未保存");
+        int n=0;for(const auto& piece:r.pieces){check(cancel);
+            const auto name=piece.sourceOccurrence<0?QStringLiteral("CustomerEnvelope"):QStringLiteral("RetainedPart%1").arg(++n);
+            bool found=false;for(size_t i=0;i<read->occurrences.size();++i){const auto& o=read->occurrences[i];if(o.partIndex<0)continue;
+                const auto& part=read->parts[o.partIndex];if(part.name!=name)continue;
+                if(found)throw std::runtime_error("STEP 回读的形体标识不唯一，未保存");found=true;
+                const auto placed=part.shape.Moved(TopLoc_Location(o.worldTransform));const auto before=bounds(piece.shape),after=bounds(placed);
+                if(std::abs(volume(placed)-volume(piece.shape))>std::max(1.e-5,volume(piece.shape)*1.e-7))throw std::runtime_error("STEP 回读的独立形体体积不一致，未保存");
+                for(int k=0;k<6;++k)if(std::abs(before[k]-after[k])>1.e-4)throw std::runtime_error("STEP 回读的独立形体位置不一致，未保存");
+                const auto color=occurrenceBaseColor(*read,int(i));
+                if(std::abs(color.red()-piece.color.red())>1||std::abs(color.green()-piece.color.green())>1||std::abs(color.blue()-piece.color.blue())>1)
+                    throw std::runtime_error("STEP 回读的实例颜色不一致，未保存");
+            }if(!found)throw std::runtime_error("STEP 回读缺少独立形体，未保存");
+        }
+    }
+    for(const auto& tool:options.protections)if(commonVolume(roundtrip,tool.shape,cancel)>1.e-5)
+        throw std::runtime_error("STEP 回读的保护空间仍被材料占据，未保存");
     check(cancel);QSaveFile out(path);if(!out.open(QIODevice::WriteOnly))throw std::runtime_error(out.errorString().toStdString());
     for(size_t i=0;i<bytes.size();i+=1048576){check(cancel);const auto n=std::min(size_t(1048576),bytes.size()-i);
         if(out.write(bytes.data()+i,qint64(n))!=qint64(n))throw std::runtime_error("STEP 保存失败");}

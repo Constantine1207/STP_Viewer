@@ -88,7 +88,7 @@ EnvelopeDialog::EnvelopeDialog(std::shared_ptr<CadDocument> doc,PlacementEdits e
         m_hasProtectionBasis=true;m_protectionBasis.SetDisplacement(gp_Ax3(),plane.Position());
         m_report->append(QStringLiteral("已记录所选平面坐标系，可在添加保护空间时选择“拾取平面”。"));
     });
-    m_report->setPlainText(QStringLiteral("选择范围并生成预览。\n\n本版不自动封闭开口或桥接缝隙，也不自动证明全部内部结构已隐藏。\n\n客户版默认统一名称和颜色，不携带原装配树、材料和 PMI。填实后的体积不能用于计算原产品质量。"));refresh();
+    m_report->setPlainText(QStringLiteral("选择范围并生成预览。\n\n本版不自动封闭开口或桥接缝隙，也不自动证明全部内部结构已隐藏。\n\n客户版使用通用名称和主体颜色；保留零件使用实例颜色，不携带原装配树、材料和 PMI。填实后的体积不能用于计算原产品质量。"));refresh();
 }
 void EnvelopeDialog::buildRules(QTabWidget* tabs){
     m_rulesPage=new QWidget;auto layout=new QVBoxLayout(m_rulesPage);
@@ -155,17 +155,24 @@ void EnvelopeDialog::addProtection(bool cylinder){
     auto hint=new QLabel(QStringLiteral("尺寸/位置单位 mm。原点为长方体最小角或圆柱底面中心，旋转依次 Rx、Ry、Rz。"));hint->setWordWrap(true);form->addRow(hint);
     auto buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);form->addRow(buttons);connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     if(dialog.exec()!=QDialog::Accepted)return;
+    try{
     gp_Trsf base,rx,ry,rz;const double deg=std::acos(-1.)/180.;
     if(basis->currentIndex()==1)base.SetDisplacement(gp_Ax3(),gp_Ax3(gp_Pnt(),gp_Dir(1,0,0),gp_Dir(0,1,0)));
     if(basis->currentIndex()==2)base.SetDisplacement(gp_Ax3(),gp_Ax3(gp_Pnt(),gp_Dir(0,1,0),gp_Dir(0,0,1)));
     if(basis->currentIndex()==3){if(!m_hasProtectionBasis){m_report->setPlainText(QStringLiteral("尚未拾取基准平面，请先预览并拾取。"));return;}base=m_protectionBasis;}
     rx.SetRotation(gp_Ax1(gp_Pnt(),gp_Dir(1,0,0)),values[6]->value()*deg);ry.SetRotation(gp_Ax1(gp_Pnt(),gp_Dir(0,1,0)),values[7]->value()*deg);rz.SetRotation(gp_Ax1(gp_Pnt(),gp_Dir(0,0,1)),values[8]->value()*deg);
     auto local=rz*ry*rx;local.SetTranslationPart(gp_Vec(values[3]->value(),values[4]->value(),values[5]->value()));
-    m_options.protections.push_back({envelopeProtectionPrimitive(cylinder,values[0]->value(),values[1]->value(),values[2]->value(),base*local),cylinder?QStringLiteral("圆柱空间"):QStringLiteral("长方体空间"),false});
+    m_options.protections.push_back({envelopeProtectionPrimitive(cylinder,values[0]->value(),values[1]->value(),values[2]->value(),base*local),QStringLiteral("%1 %2/%3/%4 mm @ %5,%6,%7 [%8]")
+        .arg(cylinder?QStringLiteral("圆柱 R/Y/H"):QStringLiteral("长方体 X/Y/Z"))
+        .arg(values[0]->value()).arg(values[1]->value()).arg(values[2]->value())
+        .arg(values[3]->value()).arg(values[4]->value()).arg(values[5]->value()).arg(basis->currentText()),false});
     updateProtectionList();invalidate();
+    }catch(const Standard_Failure& e){m_report->setPlainText(QString::fromUtf8(e.GetMessageString()));}
+    catch(const std::exception& e){m_report->setPlainText(QString::fromUtf8(e.what()));}
 }
 void EnvelopeDialog::previewRules(){
     if(m_busy||m_rendering||m_closing)return;
+    m_view->cancelSectionPlanePick();
     auto document=std::make_shared<std::shared_ptr<CadDocument>>();const auto source=m_source;const auto edits=m_edits;const auto options=m_options;QPointer<EnvelopeDialog> self(this);
     m_busy=true;refresh();m_jobs->enqueue(m_owner,[document,source,edits,options](std::atomic_bool& cancel,const ProgressCallback&){
         EnvelopeResult preview;for(size_t i=0;i<source->occurrences.size();++i){const auto& o=source->occurrences[i];if(o.partIndex<0)continue;
@@ -184,7 +191,7 @@ void EnvelopeDialog::previewRules(){
 void EnvelopeDialog::locateRule(){
     if(!m_preserveList->currentItem()||!m_originalPreview||m_mode->currentIndex()==0)return;
     const int target=m_preserveList->currentItem()->data(Qt::UserRole).toInt();int ordinal=0;
-    if(m_result){for(const auto& piece:m_result->originalPieces){++ordinal;if(piece.sourceOccurrence==target)break;}}
+    if(m_result){bool found=false;for(const auto& piece:m_result->originalPieces){++ordinal;if(piece.sourceOccurrence==target){found=true;break;}}if(!found)return;}
     else for(int i=0;i<=target;++i)if(m_source->occurrences[i].partIndex>=0)++ordinal;
     const auto doc=m_mode->currentIndex()==2?m_resultPreviewTools:m_originalPreview;
     for(size_t i=0;i<doc->occurrences.size();++i){const auto& o=doc->occurrences[i];if(o.partIndex>=0&&doc->parts[o.partIndex].name==QString("RetainedPart%1").arg(ordinal))m_view->selectOccurrences({int(i)});}
@@ -232,7 +239,7 @@ void EnvelopeDialog::generate(){
         if(!self)return;self->m_busy=false;if(self->m_closing){self->finishClose();return;}
         if(!error.isEmpty()){self->m_report->setPlainText(error);self->refresh();return;}
         self->m_result=result;self->m_originalPreview=*original;self->m_resultPreview=*output;self->m_resultPreviewTools=*tools;
-        self->m_report->setPlainText(QStringLiteral("几何处理完成，待交付检查\n\n输入：%1 个零件实例 / %2 个实体\n输出：%3 个实体\n填充封闭空腔：%4 个\n合并后原体积：%5 mm³\n结果体积：%6 mm³\n新增体积：%7 mm³\n\n%8")
+        self->m_report->setPlainText(QStringLiteral("几何处理完成，待交付检查\n\n输入：%1 个零件实例 / %2 个实体\n输出：%3 个实体\n填充封闭空腔：%4 个\n合并后原体积：%5 mm³\n结果体积：%6 mm³\n体积差（含重叠）：%7 mm³\n\n%8")
             .arg(result->inputOccurrences).arg(result->inputSolids).arg(result->outputSolids).arg(result->filledCavities)
             .arg(result->inputVolume,0,'g',10).arg(result->outputVolume,0,'g',10).arg(result->outputVolume-result->inputVolume,0,'g',10).arg(result->warnings.join("\n\n")));
         self->m_report->append(QStringLiteral("\n参与填实：%1 个实例；保留：%2 个实例\n重叠材料：%3 mm³\n保护空间切除：%4 mm³，其中原有材料：%5 mm³")

@@ -82,6 +82,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     const auto keepPath=dir.filePath("retained.step");Stp::exportCustomerEnvelope(retained,keep,keepPath,doc.sourcePath,cancel);
     auto keepRead=Stp::loadStep(keepPath,{},cancel);require(keepRead->parts.size()==2,"preserved part fused at export");
     bool red=false;for(size_t i=0;i<keepRead->occurrences.size();++i){const auto& o=keepRead->occurrences[i];if(o.partIndex<0)continue;
+        std::cout<<"Retained round-trip part: "<<keepRead->parts[o.partIndex].name.toStdString()<<"\n";
         require(keepRead->parts[o.partIndex].name=="CustomerEnvelope"||keepRead->parts[o.partIndex].name=="RetainedPart1","original name leaked");
         if(keepRead->parts[o.partIndex].name=="RetainedPart1")red=std::abs(Stp::occurrenceBaseColor(*keepRead,int(i)).red()-224)<=1;}
     require(red,"retained color lost in STEP");
