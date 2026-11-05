@@ -493,6 +493,10 @@ void MainWindow::buildUi()
     auto treePanel=new QWidget; auto treeLayout=new QVBoxLayout(treePanel); treeLayout->setContentsMargins(6,6,6,6);
     m_filter=new QLineEdit; m_filter->setPlaceholderText(QStringLiteral("搜索名称 / 路径")); treeLayout->addWidget(m_filter);
     m_tree=new QTreeWidget; m_tree->setObjectName("assemblyTree"); m_tree->setHeaderLabels({QStringLiteral("零件 / 装配"),QStringLiteral("类型")});
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tree,&QTreeWidget::customContextMenuRequested,this,[this](const QPoint& position){
+        if(auto item=m_tree->itemAt(position))showPartAppearanceMenu(item->data(0,Qt::UserRole).toInt(),m_tree->viewport()->mapToGlobal(position));
+    });
     m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection); m_tree->setColumnWidth(0,210); treeLayout->addWidget(m_tree);
     treeDock->setWidget(treePanel); addDockWidget(Qt::LeftDockWidgetArea,treeDock);
     connect(m_filter,&QLineEdit::textChanged,this,&MainWindow::filterTree);
@@ -861,6 +865,17 @@ void MainWindow::showPartAppearanceMenu(int occurrence,const QPoint& globalPosit
             &&self->m_appearanceMenuGeneration==generation&&document.lock()==self->m_document
             &&self->canChangeAppearance();
     };
+    menu->addSeparator();
+    auto preserve=menu->addAction(QStringLiteral("客户外包络：保留原几何"));preserve->setObjectName("preserveEnvelopePart");
+    auto restore=menu->addAction(QStringLiteral("客户外包络：恢复默认处理"));restore->setObjectName("restoreEnvelopePart");
+    for(auto action:{preserve,restore})action->setEnabled(m_placementSceneReady&&!m_busy);
+    const auto setRule=[this,validMenu,occurrence](bool keep){if(!validMenu()||!m_placementSceneReady)return;
+        auto selection=m_currentSelection;if(std::find(selection.begin(),selection.end(),occurrence)==selection.end())selection={occurrence};
+        const auto leaves=envelopeScope(*m_document,selection);auto& rules=m_envelopeOptions.preservedOccurrences;
+        for(int leaf:leaves){rules.erase(std::remove(rules.begin(),rules.end(),leaf),rules.end());if(keep)rules.push_back(leaf);}
+        diagnostic(QStringLiteral("客户外包络：%1 个实例已设为%2（仅当前模型会话有效）。").arg(leaves.size()).arg(keep?QStringLiteral("保留原几何"):QStringLiteral("默认处理")));
+    };
+    connect(preserve,&QAction::triggered,this,[setRule]{setRule(true);});connect(restore,&QAction::triggered,this,[setRule]{setRule(false);});
     const auto validPart=[self,validMenu,occurrence]{
         return validMenu()&&occurrence>=0
             &&size_t(occurrence)<self->m_document->occurrences.size()
@@ -1172,7 +1187,7 @@ void MainWindow::beginLoadDocument(const QString& path)
             if(m_embedded){m_importError->setText(QStringLiteral("读取未完成：%1").arg(error));m_importFailure->show();emit stateChanged();return;}
             if(!error.contains(QStringLiteral("取消")))QMessageBox::warning(this,QStringLiteral("导入未完成"),error);return;
         }
-        m_colors.clear();m_savedColors.clear();m_colorHistory.clear();
+        m_colors.clear();m_savedColors.clear();m_colorHistory.clear();m_envelopeOptions={};
         m_document=*document;m_pmi=*pmi;m_transformPanel->setDocument(m_document);populateDocument();
         setBusy(true,QStringLiteral("建立三维显示…"));m_progress->setValue(98);m_view->setDocument(m_document,m_pmi,true);
     });
@@ -1332,8 +1347,9 @@ void MainWindow::openCustomerEnvelope()
     m_transformPanel->cancelPreview();m_view->cancelSectionPlanePick();m_view->finishPartDrag();
     cancelPendingMeasurementForSessionSwitch();
     // Application-modal snapshot prevents placement/scope edits while a preview is being reviewed.
-    EnvelopeDialog dialog(m_document,m_transformPanel->committedEdits(),m_view->selectedOccurrences(),m_jobs,this);
-    dialog.exec();
+    m_envelopeOptions.preservedColors=m_colors;
+    EnvelopeDialog dialog(m_document,m_transformPanel->committedEdits(),m_view->selectedOccurrences(),m_jobs,this,m_envelopeOptions);
+    dialog.exec();m_envelopeOptions=dialog.options();
 }
 
 void MainWindow::openPlacementPanel()

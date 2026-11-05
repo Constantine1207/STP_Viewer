@@ -1,7 +1,7 @@
 name: Portable desktop build
 on:
   push:
-    branches: [main, feature/section-color-editing, fix/workspace-regression, feature/details-two-rows, feature/customer-envelope]
+    branches: [main, feature/section-color-editing, fix/workspace-regression, feature/details-two-rows, feature/customer-envelope, feature/envelope-preservation]
   workflow_dispatch:
     inputs:
       build_macos:
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: STPViewer-envelope-windows-x64
+          name: STPViewer-preservation-windows-x64
           path: |
             dist/*.exe*
             dist/*.zip*
