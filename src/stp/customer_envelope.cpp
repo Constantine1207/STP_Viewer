@@ -80,7 +80,13 @@ TopoDS_Shape fuse(const std::vector<TopoDS_Shape>& shapes,std::atomic_bool& canc
     op.SetNonDestructive(true);op.SetRunParallel(false);
     Handle(Progress) p=new Progress(cancel);op.Build(p->Start());check(cancel);
     if(!op.IsDone()||op.HasErrors())throw std::runtime_error("实体合并失败；请检查重叠面、微小缝隙或异常几何");
-    if(op.HasWarnings())throw std::runtime_error("几何内核报告合并警告；为避免遗漏几何，本次停止处理");
+    if(op.HasWarnings()){
+        std::ostringstream detail;op.DumpWarnings(detail);
+        std::map<std::string,int> counts;std::istringstream lines(detail.str());std::string line;
+        while(std::getline(lines,line))if(!line.empty())++counts[line];
+        std::ostringstream summary;for(const auto& entry:counts)summary<<entry.first<<" × "<<entry.second<<"\n";
+        throw std::runtime_error("实体合并出现内核警告，已停止生成。请检查微小边、自相交和未参与构面的几何：\n"+summary.str());
+    }
     auto s=op.Shape();if(s.IsNull()||!BRepCheck_Analyzer(s).IsValid())throw std::runtime_error("合并结果无效");
     return s;
 }
@@ -130,32 +136,41 @@ std::map<int,QString> envelopePreservationCandidates(const CadDocument& doc,cons
     }return result;
 }
 EnvelopeResult buildCustomerEnvelope(const CadDocument& doc,const PlacementEdits& edits,
-    const std::vector<int>& selected,const EnvelopeOptions& options,std::atomic_bool& cancel,const ProgressCallback& progress){
+    const std::vector<int>& selected,const EnvelopeOptions& options,std::atomic_bool& cancel,const ProgressCallback& progress,EnvelopeInspection* inspection){
     check(cancel);validatePlacementEdits(doc,edits);
     const auto scope=envelopeScope(doc,selected);if(scope.empty())throw std::runtime_error("请先选择至少一个实体零件");
     EnvelopeResult r;r.inputOccurrences=int(scope.size());std::vector<TopoDS_Shape> solids,allSolids;
     const auto preserve=envelopeScope(doc,options.preservedOccurrences);
     std::vector<EnvelopePiece> retained;
     validateColorEdits(doc,options.preservedColors);
-    for(int i:scope){
-        check(cancel);const auto& o=doc.occurrences[i];
-        if(size_t(o.partIndex)>=doc.parts.size())throw std::runtime_error("零件索引无效");
-        // Deep-copy geometry so Boolean processing and preview meshes cannot alter source caches.
-        BRepBuilderAPI_Copy copy(doc.parts[o.partIndex].shape,true,false);
-        auto placed=copy.Shape().Moved(TopLoc_Location(placedWorldTransform(doc,edits,i)));
-        collect(placed,allSolids);r.originalPieces.push_back({placed,QColor("#b0b0b0"),i});
+    const auto inputs=inspectEnvelopeInputs(doc,edits,selected,options.repairInputs,cancel,progress);
+    if(inspection)*inspection=inputs;
+    if(inputs.invalidCount())throw std::runtime_error(inputs.text().toStdString());
+    r.inputInspection=inputs.report();r.originalPieces=inputs.originalPieces;
+    for(const auto& issue:inputs.issues)if(issue.repaired)
+        r.warnings<<QStringLiteral("实例 [%1] %2 已采用受控修复，请检查原几何与结果的外形和接口。").arg(issue.occurrence).arg(issue.name);
+    for(const auto& piece:inputs.preparedPieces){
+        check(cancel);const int i=piece.sourceOccurrence;const auto& placed=piece.shape;
+        // These exact assembly-coordinate shapes have already passed inspection.
+        // Flatten them once instead of repeating the expensive analyzer twice.
+        std::vector<TopoDS_Shape> preparedSolids;
+        for(TopExp_Explorer it(placed,TopAbs_SOLID);it.More();it.Next())preparedSolids.push_back(it.Current());
+        allSolids.insert(allSolids.end(),preparedSolids.begin(),preparedSolids.end());
         if(std::binary_search(preserve.begin(),preserve.end(),i)){
             const auto color=options.preservedColors.find(i);
             retained.push_back({placed,color==options.preservedColors.end()?occurrenceBaseColor(doc,i):color->second,i});
             ++r.preservedOccurrences;
-        }else{collect(placed,solids);++r.processedOccurrences;}
+        }else{solids.insert(solids.end(),preparedSolids.begin(),preparedSolids.end());++r.processedOccurrences;}
     }
     r.inputSolids=int(allSolids.size());r.original=compound(allSolids);r.originalBounds=bounds(r.original);
-    r.inputVolume=volume(fuse(allSolids,cancel));
+    // Reuse the input union when all instances participate in the body.
+    // Otherwise the volume baseline also includes the independently retained parts.
+    TopoDS_Shape merged;
+    if(progress)progress(20,QStringLiteral("合并精确实体…"));
+    if(!solids.empty())merged=fuse(solids,cancel);
+    r.inputVolume=retained.empty()?volume(merged):volume(fuse(allSolids,cancel));
     TopoDS_Shape body;
     if(!solids.empty()){
-    if(progress)progress(20,QStringLiteral("合并精确实体…"));
-    const auto merged=fuse(solids,cancel);
     std::vector<TopoDS_Shape> mergedSolids;collect(merged,mergedSolids);
     if(options.fillClosedCavities){
         if(progress)progress(45,QStringLiteral("填充完全封闭的空腔…"));
@@ -175,8 +190,8 @@ EnvelopeResult buildCustomerEnvelope(const CadDocument& doc,const PlacementEdits
         }
     }
     if(progress)progress(65,QStringLiteral("去除填实体内的冗余结构…"));
-    // A second union absorbs enclosed PCB/fasteners, and retains protruding material.
-    body=fuse(mergedSolids,cancel);
+    // Only filled cavities introduce new overlaps that require a second union.
+    body=r.filledCavities?fuse(mergedSolids,cancel):merged;
     const double bodyBefore=volume(body);
     if(bodyBefore<volume(merged)-std::max(1.e-6,volume(merged)*1.e-8))throw std::runtime_error("填实后体积异常");
     for(const auto& protection:options.protections){
@@ -219,7 +234,7 @@ EnvelopeResult buildCustomerEnvelope(const CadDocument& doc,const PlacementEdits
             throw std::runtime_error("处理超出了原始外形边界");
     }
     if(!std::isfinite(r.outputVolume)||r.outputVolume<=0)throw std::runtime_error("处理后体积异常");
-    if(!retained.empty())r.warnings<<QStringLiteral("保留零件按原几何和实例颜色独立导出；内部细节也会保留，请确认适合客户交付。体积为实体体积之和，可能包含重叠。");
+    if(!retained.empty())r.warnings<<QStringLiteral("保留零件按通过输入检查的几何和实例颜色独立导出；内部细节也会保留，请确认适合客户交付。体积为实体体积之和，可能包含重叠。");
     if(r.outputSolids>1)r.warnings<<QStringLiteral("结果仍包含 %1 个独立实体；没有跨越装配缝隙自动增加材料。").arg(r.outputSolids);
     if(!options.fillClosedCavities)r.warnings<<QStringLiteral("未启用空腔填实，结果可能保留内部空腔。");
     if(options.fillClosedCavities&&!r.filledCavities)r.warnings<<QStringLiteral("未发现独立的封闭空腔；不代表模型没有对外连通的内部空间。");
@@ -232,7 +247,7 @@ QJsonObject EnvelopeResult::report() const{
     return {{"inputOccurrences",inputOccurrences},{"inputSolids",inputSolids},{"outputSolids",outputSolids},
         {"preservedOccurrences",preservedOccurrences},{"processedOccurrences",processedOccurrences},
         {"overlapVolumeMm3",overlapVolume},{"removedVolumeMm3",removedVolume},{"removedOriginalVolumeMm3",removedOriginalVolume},
-        {"filledClosedCavities",filledCavities},{"inputUnionVolumeMm3",inputVolume},{"outputVolumeMm3",outputVolume},
+        {"inputInspection",inputInspection},{"filledClosedCavities",filledCavities},{"inputUnionVolumeMm3",inputVolume},{"outputVolumeMm3",outputVolume},
         {"addedVolumeMm3",outputVolume-inputVolume},{"boundsMm",box},{"originalBoundsMm",originalBox},{"reviewRequired",true},{"warnings",w}};
 }
 std::shared_ptr<CadDocument> envelopeDocument(const TopoDS_Shape& shape,const QColor& color){
