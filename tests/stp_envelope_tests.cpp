@@ -9,6 +9,10 @@
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <TopoDS_Shell.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
@@ -20,7 +24,17 @@ bool contains(const TopoDS_Shape& s,const gp_Pnt& p){for(TopExp_Explorer it(s,To
     BRepClass3d_SolidClassifier c(TopoDS::Solid(it.Current()),p,1.e-7);if(c.State()==TopAbs_IN||c.State()==TopAbs_ON)return true;}return false;}
 }
 int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
-    std::atomic_bool cancel(false);Stp::EnvelopeOptions options;auto doc=envelopeAssemblyFixture();
+    std::atomic_bool cancel(false);
+    // Engineering models are supplied locally by the caller, never embedded in CI.
+    if(argc>=4&&QString::fromLocal8Bit(argv[1])=="--inspect"){
+        const auto model=Stp::loadStep(QString::fromLocal8Bit(argv[2]),{},cancel);
+        const bool repair=argc>4&&QString::fromLocal8Bit(argv[4])=="--repair";
+        const auto inspected=Stp::inspectEnvelopeInputs(*model,{},envelopeRoots(*model),repair,cancel);
+        QFile file(QString::fromLocal8Bit(argv[3]));require(file.open(QIODevice::WriteOnly),"cannot write input report");
+        const auto bytes=QJsonDocument(inspected.report()).toJson();require(file.write(bytes)==bytes.size(),"input report incomplete");
+        std::cout<<inspected.text().toStdString()<<"\n";return 0;
+    }
+    Stp::EnvelopeOptions options;auto doc=envelopeAssemblyFixture();
     auto result=Stp::buildCustomerEnvelope(doc,{},envelopeRoots(doc),options,cancel);
     require(result.inputOccurrences==3&&result.outputSolids==1&&result.filledCavities==1,"closed cavity or internal PCB not removed");
     require(std::abs(result.outputVolume-8000)<1.e-5&&contains(result.shape,gp_Pnt(10,10,10)),"filled geometry is not solid");
@@ -141,6 +155,41 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     const auto sharedLeaves=Stp::envelopeScope(shared,envelopeRoots(shared));Stp::EnvelopeOptions one;one.preservedOccurrences={sharedLeaves.back()};
     auto sharedResult=Stp::buildCustomerEnvelope(shared,{},envelopeRoots(shared),one,cancel);
     require(sharedResult.preservedOccurrences==1&&sharedResult.processedOccurrences==1,"shared definition rule leaked to all instances");
-    std::cout<<"Envelope: closed cavities, PCB removal, holes, gaps, overlaps, contacting halves, protrusions, transforms, scope, rejection, cancellation and STEP round-trip passed\n";
+    // Collect all failing instances before any Boolean work, including retained geometry.
+    auto reversed=BRepPrimAPI_MakeBox(2,3,4).Shape();reversed.Reverse();
+    auto invalid=envelopeFixture({BRepPrimAPI_MakeBox(2,3,4).Shape(),BRepBuilderAPI_MakeFace(gp_Pln(),0,10,0,10).Shape()});
+    invalid.parts.front().shape=reversed;
+    const auto invalidLeaves=Stp::envelopeScope(invalid,envelopeRoots(invalid));
+    const auto inspected=Stp::inspectEnvelopeInputs(invalid,{},envelopeRoots(invalid),false,cancel);
+    require(inspected.issues.size()==2&&inspected.invalidCount()==2,"input diagnostics stopped at first invalid instance");
+    require(inspected.text().contains("SecretPart1")&&inspected.text().contains("SecretPart2"),"diagnostics missing instance names");
+    require(inspected.report().value("instances").toArray().size()==2,"diagnostic JSON incomplete");
+    Stp::EnvelopeOptions invalidOptions;invalidOptions.preservedOccurrences={invalidLeaves.front()};
+    Stp::EnvelopeInspection rejectedInput;bool booleanStarted=false;
+    rejects([&]{Stp::buildCustomerEnvelope(invalid,{},envelopeRoots(invalid),invalidOptions,cancel,
+        [&](int n,const QString&){if(n>=20)booleanStarted=true;},&rejectedInput);},"invalid retained shape accepted");
+    require(!booleanStarted&&rejectedInput.invalidCount()==2,"Boolean processing started before input validation");
+    auto repairDoc=envelopeFixture({BRepPrimAPI_MakeBox(2,3,4).Shape()});repairDoc.parts.front().shape=reversed;
+    const auto repairLeaf=Stp::envelopeScope(repairDoc,envelopeRoots(repairDoc)).front();
+    const auto fixed=Stp::inspectEnvelopeInputs(repairDoc,{{repairLeaf,rotation}},envelopeRoots(repairDoc),true,cancel);
+    require(fixed.invalidCount()==0&&fixed.issues.front().repaired,"reversed placed solid not repaired");
+    require(repairDoc.parts.front().shape.Orientation()==TopAbs_REVERSED,"repair modified source orientation");
+    require(std::abs(fixed.issues.front().preparedVolume-24)<1.e-6,"repair changed material volume");
+    require(contains(fixed.preparedPieces.front().shape,gp_Pnt(8,21,32)),"repair lost assembly placement");
+    Stp::EnvelopeOptions repairOptions;repairOptions.repairInputs=true;
+    auto repairedResult=Stp::buildCustomerEnvelope(repairDoc,{{repairLeaf,rotation}},envelopeRoots(repairDoc),repairOptions,cancel);
+    require(repairedResult.outputSolids==1&&std::abs(repairedResult.outputVolume-24)<1.e-6,"repaired input not used by generation");
+    Stp::exportCustomerEnvelope(repairedResult,repairOptions,dir.filePath("repaired.step"),repairDoc.sourcePath,cancel);
+    TopoDS_Shell openShell;BRep_Builder builder;builder.MakeShell(openShell);int faceIndex=0;
+    const auto openBox=BRepPrimAPI_MakeBox(2,3,4).Shape();
+    for(TopExp_Explorer faces(openBox,TopAbs_FACE);faces.More();faces.Next())
+        if(faceIndex++>0)builder.Add(openShell,faces.Current());
+    auto broken=envelopeFixture({BRepPrimAPI_MakeBox(2,3,4).Shape()});broken.parts.front().shape=BRepBuilderAPI_MakeSolid(openShell).Solid();
+    const auto brokenReport=Stp::inspectEnvelopeInputs(broken,{},envelopeRoots(broken),true,cancel);
+    require(brokenReport.invalidCount()==1&&!brokenReport.issues.front().repaired,"open solid falsely repaired");
+    require(!brokenReport.issues.front().before.empty(),"open solid missing diagnostics");
+    cancel=true;rejects([&]{Stp::inspectEnvelopeInputs(doc,{},envelopeRoots(doc),true,cancel);},"diagnostic cancellation ignored");cancel=false;
+    require(Stp::inspectEnvelopeInputs(doc,{}, {leaves.front()},false,cancel).issues.size()==1,"diagnostic scope ignored");
+    std::cout<<"Envelope: closed cavities, PCB removal, holes, gaps, overlaps, contacting halves, protrusions, transforms, scope, rejection, cancellation, input diagnostics, bounded repair and STEP round-trip passed\n";
     return 0;
 }catch(const Standard_Failure& e){std::cerr<<e.GetMessageString();return 1;}catch(const std::exception& e){std::cerr<<e.what();return 1;}}

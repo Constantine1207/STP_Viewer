@@ -14,7 +14,7 @@ endif()
 add_library(stp_core STATIC
     src/stp/cad_document.cpp src/stp/bom_export.cpp src/stp/part_export.cpp src/stp/pmi.cpp
     src/stp/measurement.cpp src/stp/part_placement.cpp src/stp/assembly_export.cpp
-    src/stp/color_edits.cpp src/stp/section_state.cpp src/stp/customer_envelope.cpp)
+    src/stp/color_edits.cpp src/stp/section_state.cpp src/stp/customer_envelope.cpp src/stp/envelope_input.cpp)
 target_include_directories(stp_core PUBLIC src src/stp "${OpenCASCADE_INCLUDE_DIR}")
 target_link_libraries(stp_core PUBLIC Qt6::Core Qt6::Gui STP::xlsxwriter
     TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKMesh

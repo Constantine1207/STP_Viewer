@@ -31,6 +31,8 @@
 #include <QDialogButtonBox>
 #include <QTreeWidget>
 #include <QMenu>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <gp_Pln.hxx>
 #include <iostream>
 #include <stdexcept>
 
@@ -149,6 +151,28 @@ int main(int argc,char** argv){
             cleared=dialog->options().preservedOccurrences.empty()&&dialog->options().protections.empty();dialog->reject();});
         action->trigger();require(cleared,"rules leaked into reloaded model");report["rulesClearOnReload"]=true;
         workspace.closeAll();waitFor([&]{return workspace.documentCount()==0&&workspace.jobQueue()->idle();});
+        auto bad=std::make_shared<Stp::CadDocument>(envelopeFixture({
+            BRepBuilderAPI_MakeFace(gp_Pln(),0,10,0,10).Shape(),BRepPrimAPI_MakeBox(2,3,4).Shape()}));
+        Stp::EnvelopeDialog failed(bad,{},envelopeRoots(*bad),workspace.jobQueue());failed.show();
+        auto inspect=control<QPushButton>(&failed,"envelopeInspect");
+        auto badGenerate=control<QPushButton>(&failed,"envelopeGenerate");
+        auto badSave=control<QPushButton>(&failed,"envelopeExport");
+        auto badMode=control<QComboBox>(&failed,"envelopePreviewMode");
+        inspect->click();waitFor([&]{return inspect->isEnabled();});
+        auto issues=control<QListWidget>(&failed,"envelopeInputIssues");
+        require(issues->count()==1&&!failed.result()&&!badSave->isEnabled(),"inspection exposed stale export or missed failure");
+        require(badMode->currentIndex()==2&&badMode->isEnabled(),"failed input did not preview source");
+        require(control<QTextEdit>(&failed,"envelopeReport")->toPlainText().contains("SecretPart1"),"failure report missing named part");
+        issues->setCurrentRow(0);QTest::mouseClick(issues->viewport(),Qt::LeftButton,Qt::NoModifier,issues->visualItemRect(issues->item(0)).center());
+        require(!control<Stp::ViewerWidget>(&failed,"envelopeViewer")->selectedOccurrences().empty(),"diagnostic locate did not select geometry");
+        badGenerate->click();waitFor([&]{return badGenerate->isEnabled();});
+        require(issues->count()==1&&!failed.result()&&badMode->currentIndex()==2,"generation failure lost diagnosis/source");
+        require(failed.grab().save(output+"/envelope-input-diagnostics.png"),"diagnostic screenshot failed");
+        control<QCheckBox>(&failed,"envelopeRepairInputs")->setChecked(true);
+        require(issues->count()==0&&!badSave->isEnabled(),"repair option kept stale inspection");
+        inspect->click();waitFor([&]{return inspect->isEnabled();});require(issues->count()==1,"open face repair falsely passed");
+        failed.reject();waitFor([&]{return !failed.isVisible()&&workspace.jobQueue()->idle();});
+        report["inputDiagnosticsSourcePreviewAndRepairInvalidation"]=true;
         report["status"]="passed";
     }catch(const Standard_Failure& e){failure=QString::fromUtf8(e.GetMessageString());}catch(const std::exception& e){failure=QString::fromUtf8(e.what());}
     if(!failure.isEmpty()){report["status"]="failed";report["error"]=failure;}
